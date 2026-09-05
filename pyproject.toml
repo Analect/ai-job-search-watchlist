@@ -1,0 +1,32 @@
+[project]
+name = "ai-job-search-watchlist"
+version = "0.1.0"
+description = "Personal job-search watchlist platform: per-ATS ingest pipelines, a postings/review web app, and an MCP server, deployed on OpenChoreo."
+requires-python = ">=3.12"
+dependencies = [
+    "dlt[postgres]>=1.0",
+    "psycopg2-binary>=2.9",
+    "mcp>=1.0",
+    "marimo>=0.23.2",
+    "scikit-learn>=1.5",
+    "umap-learn>=0.5",
+    "boto3>=1.34",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "api/tests", "mcp_server/tests"]
