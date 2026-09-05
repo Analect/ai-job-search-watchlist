@@ -107,9 +107,17 @@ def _public_api_postings(host: str, group_id: str) -> Iterator[dict[str, Any]]:
                 else datetime.fromtimestamp(t_create, tz=UTC).date().isoformat(),
                 "description_text": description_text,
             }
-        if len(positions) < page_size:
+        if not positions:
             break
-        start += page_size
+        # The API silently caps each page at some server-side size
+        # regardless of the requested `num` (confirmed live: num=100
+        # still returns only 10 positions/page) - advance by the
+        # actual count returned, and stop once we've reached the
+        # response's own reported total rather than trusting `num`.
+        start += len(positions)
+        total = data.get("count")
+        if total is not None and start >= total:
+            break
 
 
 def _sitemap_postings(host: str) -> Iterator[dict[str, Any]]:
