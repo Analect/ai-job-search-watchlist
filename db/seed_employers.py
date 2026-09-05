@@ -51,6 +51,7 @@ ranked_boards as (
     b.company_slug,
     b.monitor_type,
     b.monitor_config,
+    b.board_url,
     row_number() over (
       partition by b.company_slug
       order by coalesce(a.rank, 999), b.board_slug
@@ -66,7 +67,25 @@ matched as (
     i.name as industry,
     c.employee_count_range,
     rb.monitor_type as ats_type,
-    coalesce(rb.monitor_config, '{{}}'::jsonb) as ats_config
+    -- jseek's own monitor_config is sometimes null even though the token
+    -- is trivially derivable from board_url's last path segment (jseek's
+    -- own monitors have a _token_from_url() fallback for exactly this;
+    -- this seed script didn't, until this fix — confirmed live for
+    -- huggingface/workable, modal/ashby, black-forest-labs/greenhouse).
+    -- Deliberately narrow: only the three ATS types with a simple
+    -- single-segment board_url shape; workday's URLs are too varied
+    -- (tal.net, myworkdayjobs.com subdomains) to derive this way.
+    case
+      when rb.monitor_config is not null and rb.monitor_config != '{{}}'::jsonb
+        then rb.monitor_config
+      when rb.monitor_type = 'greenhouse' then
+        jsonb_build_object('token', regexp_replace(rb.board_url, '.*greenhouse\\.io/([\\w-]+).*', '\\1'))
+      when rb.monitor_type = 'ashby' then
+        jsonb_build_object('token', regexp_replace(rb.board_url, '.*ashbyhq\\.com/([\\w-]+).*', '\\1'))
+      when rb.monitor_type = 'workable' then
+        jsonb_build_object('token', regexp_replace(rb.board_url, '.*workable\\.com/([\\w-]+).*', '\\1'))
+      else coalesce(rb.monitor_config, '{{}}'::jsonb)
+    end as ats_config
   from _shortlist_names s
   join jseek_companies c on c.name = s.company_name
   left join jseek_industries i on i.id = c.industry_id
