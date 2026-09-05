@@ -57,11 +57,15 @@ def _upsert_description(job_posting_external_id: str, employer_id: str, content:
     write_disposition={"disposition": "merge", "strategy": "upsert"},
 )
 def postings_resource():
-    for employer in _active_employers("greenhouse"):
+    employers = _active_employers("greenhouse")
+    print(f"[greenhouse] {len(employers)} active employer(s) to fetch", flush=True)
+    for employer in employers:
+        print(f"[greenhouse] fetching {employer.slug} ({employer.id})...", flush=True)
         run_id = start_scrape_run(employer.id)
         external_ids_seen: list[str] = []
         try:
             postings = list(fetch_postings(employer))
+            print(f"[greenhouse] {employer.slug}: {len(postings)} posting(s) fetched", flush=True)
             for p in postings:
                 external_ids_seen.append(p["external_id"])
                 yield {
@@ -86,18 +90,21 @@ def postings_resource():
                 if p.get("description_text"):
                     _upsert_description(p["external_id"], employer.id, p["description_text"])
         except Exception as exc:
+            print(f"[greenhouse] {employer.slug}: FAILED - {exc}", flush=True)
             complete_scrape_run(run_id, status="failed", error_message=str(exc))
             continue  # FR-009: one employer's failure must not stop the rest
 
 
 def run() -> None:
+    print("[greenhouse] pipeline starting", flush=True)
     pipeline = dlt.pipeline(
         pipeline_name="greenhouse-postings",
         destination=get_dlt_destination(),
         dataset_name="public",
     )
     load_info = pipeline.run(postings_resource(), table_name="job_postings")
-    print(load_info)
+    print("[greenhouse] pipeline finished", flush=True)
+    print(load_info, flush=True)
 
 
 if __name__ == "__main__":

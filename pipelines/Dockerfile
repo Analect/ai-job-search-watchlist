@@ -10,6 +10,9 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 WORKDIR /app
 ENV UV_CACHE_DIR=/tmp/uv-cache
+# Unbuffered stdout — container logs are piped, not a TTY, so Python
+# fully-buffers by default and progress prints only surface at exit.
+ENV PYTHONUNBUFFERED=1
 RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "dlt[postgres]>=1.22.0" \
     "psycopg2-binary>=2.9" \
