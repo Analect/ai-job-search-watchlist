@@ -5,6 +5,8 @@ building out the remaining 8 adapters on top of an unvalidated
 foundation.
 """
 
+import os
+
 import dlt
 
 from pipelines.adapters.greenhouse import fetch_postings
@@ -22,10 +24,17 @@ def _active_employers(ats_type: str) -> list[Employer]:
             "where active and ats_type = %s",
             (ats_type,),
         )
-        return [
+        employers = [
             Employer(id=r[0], slug=r[1], name=r[2], ats_type=r[3], ats_config=r[4] or {})
             for r in cur.fetchall()
         ]
+    # Fast-iteration escape hatch: restrict to one employer by slug, e.g. for
+    # cluster test runs while debugging the load stage without waiting on all
+    # employers' fetches every time. Unset in production (empty = all employers).
+    test_slug = os.environ.get("GREENHOUSE_TEST_EMPLOYER")
+    if test_slug:
+        employers = [e for e in employers if e.slug == test_slug]
+    return employers
 
 
 def _upsert_description(job_posting_external_id: str, employer_id: str, content: str) -> None:
@@ -49,12 +58,21 @@ def _upsert_description(job_posting_external_id: str, employer_id: str, content:
 
 @dlt.resource(
     name="greenhouse_postings",
-    primary_key=["employer_id", "external_id"],
+    # employer_id itself stays a real uuid FK (populated below, not part of
+    # the merge key); dlt's postgres merge has no native uuid type (dlt-hub/dlt#3749)
+    # — its generated staging table always types merge-key columns as varchar,
+    # which fails to JOIN against a real uuid column. employer_id_key is a
+    # plain text shadow of the same value used only as dlt's merge key.
+    primary_key=["employer_id_key", "external_id"],
     # dlt 1.x API: merge_strategy is a key in the write_disposition dict,
     # not a separate kwarg (contra the research.md §9/ats-adapter.contract.md
     # sketch, written before this was verified against a real dlt install —
     # "upsert" itself is still never omitted, only the syntax changed).
     write_disposition={"disposition": "merge", "strategy": "upsert"},
+    # Without this hint dlt flattens the raw_payload dict into individual
+    # raw_payload__<field> columns (its default for nested objects) instead
+    # of writing it into our single jsonb column.
+    columns={"raw_payload": {"data_type": "json"}},
 )
 def postings_resource():
     employers = _active_employers("greenhouse")
@@ -70,6 +88,7 @@ def postings_resource():
                 external_ids_seen.append(p["external_id"])
                 yield {
                     "employer_id": employer.id,
+                    "employer_id_key": employer.id,
                     "external_id": p["external_id"],
                     "title": p["title"],
                     "source_url": p["source_url"],
