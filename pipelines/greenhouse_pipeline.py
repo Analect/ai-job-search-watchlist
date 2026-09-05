@@ -12,6 +12,7 @@ import dlt
 from pipelines.adapters.greenhouse import fetch_postings
 from pipelines.common.closure import apply_closure
 from pipelines.common.db import get_connection, get_dlt_destination
+from pipelines.common.http_retry import BoardGoneError
 from pipelines.common.location_normalize import apply_location_normalization
 from pipelines.common.scrape_runs import complete_scrape_run, start_scrape_run
 from pipelines.common.types import Employer, parse_date
@@ -125,6 +126,16 @@ def postings_resource(completed: list[dict]):
                     "postings": postings,
                 }
             )
+        except BoardGoneError as exc:
+            # Structural signal (jseek's own distinction): the board itself
+            # was removed upstream (404), not a transient failure. scrape_runs
+            # has no separate 'gone' status (only success/failed/partial), so
+            # this still counts as 'failed' - the error_message makes it
+            # visible in employers.last_error rather than looking identical
+            # to a network blip.
+            print(f"[greenhouse] {employer.slug}: BOARD GONE - {exc}", flush=True)
+            complete_scrape_run(run_id, status="failed", error_message=f"board gone: {exc}")
+            continue
         except Exception as exc:
             print(f"[greenhouse] {employer.slug}: FAILED - {exc}", flush=True)
             complete_scrape_run(run_id, status="failed", error_message=str(exc))
