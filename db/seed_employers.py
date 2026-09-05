@@ -54,7 +54,15 @@ ranked_boards as (
     b.board_url,
     row_number() over (
       partition by b.company_slug
-      order by coalesce(a.rank, 999), b.board_slug
+      -- Among same-ats_type boards (e.g. Millennium's separate campus/
+      -- experienced-hires Eightfold boards), prefer one that isn't a
+      -- campus/graduate/intern program before falling back to
+      -- alphabetical board_slug - confirmed live that "experienced" is
+      -- the one that actually works for a professional job search
+      -- (20260904-shortlist-direct-api-coverage.md's own Eightfold test).
+      order by coalesce(a.rank, 999),
+               (b.board_slug ~* 'campus|intern|graduate')::int,
+               b.board_slug
     ) as rn
   from jseek_boards b
   left join automated a on a.ats_type = b.monitor_type
@@ -84,6 +92,13 @@ matched as (
         jsonb_build_object('token', regexp_replace(rb.board_url, '.*ashbyhq\\.com/([\\w-]+).*', '\\1'))
       when rb.monitor_type = 'workable' then
         jsonb_build_object('token', regexp_replace(rb.board_url, '.*workable\\.com/([\\w-]+).*', '\\1'))
+      -- Eightfold has no equivalent single-segment token: the adapter
+      -- needs the actual board host to fetch a group-id from the
+      -- careers page itself and try the tenant's public jobs API,
+      -- falling back to sitemap+JSON-LD scraping if that tenant blocks
+      -- it (confirmed live: mlp.com allows it, lamresearch.com doesn't).
+      when rb.monitor_type = 'eightfold' then
+        coalesce(rb.monitor_config, '{{}}'::jsonb) || jsonb_build_object('host', regexp_replace(rb.board_url, '^https?://([^/]+).*', '\\1'))
       else coalesce(rb.monitor_config, '{{}}'::jsonb)
     end as ats_config
   from _shortlist_names s
