@@ -14,7 +14,7 @@ from pipelines.common.closure import apply_closure
 from pipelines.common.db import get_connection, get_dlt_destination
 from pipelines.common.location_normalize import apply_location_normalization
 from pipelines.common.scrape_runs import complete_scrape_run, start_scrape_run
-from pipelines.common.types import Employer
+from pipelines.common.types import Employer, parse_date
 
 
 def _active_employers(ats_type: str) -> list[Employer]:
@@ -103,7 +103,7 @@ def postings_resource():
                     "is_remote": p.get("is_remote"),
                     "employment_type": p.get("employment_type"),
                     "department": p.get("department"),
-                    "posted_date": p.get("posted_date"),
+                    "posted_date": parse_date(p.get("posted_date")),
                     "raw_payload": p,
                 }
             complete_scrape_run(run_id, status="success", postings_found=len(postings))
