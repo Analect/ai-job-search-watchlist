@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pipelines.common.http_retry import BoardGoneError, fetch_json_with_retry
+from pipelines.common.text_clean import clean_description, clean_text
 from pipelines.common.types import Employer
 
 BATCH_SIZE = 100
@@ -34,7 +35,7 @@ def _build_description(posting: dict) -> str | None:
             parts.append(f"<h3>{text}</h3><ul>{content}</ul>")
     if posting.get("additional"):
         parts.append(posting["additional"])
-    return "\n".join(parts) if parts else None
+    return clean_description("\n".join(parts)) if parts else None
 
 
 def fetch_postings(employer: Employer) -> Iterator[dict[str, Any]]:
@@ -66,11 +67,18 @@ def fetch_postings(employer: Employer) -> Iterator[dict[str, Any]]:
                 posted_date = datetime.fromtimestamp(created_at / 1000, tz=UTC).date().isoformat()
             yield {
                 "external_id": job["id"],
-                "title": job.get("text"),
+                "title": clean_text(job.get("text")),
                 "source_url": job["hostedUrl"],
-                "location_raw": ", ".join(locations) if locations else None,
-                "employment_type": categories.get("commitment"),
-                "department": categories.get("department"),
+                "location_raw": clean_text(", ".join(locations)) if locations else None,
+                "employment_type": clean_text(categories.get("commitment")),
+                "department": clean_text(categories.get("department")),
+                # jseek's own DiscoveredJob captures this as job_location_type
+                # rather than a boolean, but our schema only has is_remote —
+                # 'remote' is the only workplaceType value that maps cleanly;
+                # 'hybrid'/'onsite' are deliberately left None, not False,
+                # since a posting listing a physical office isn't necessarily
+                # confirmed non-remote-eligible.
+                "is_remote": (job.get("workplaceType") == "remote") or None,
                 "posted_date": posted_date,
                 "description_text": _build_description(job),
             }
