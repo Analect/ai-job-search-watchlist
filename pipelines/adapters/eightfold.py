@@ -59,12 +59,20 @@ def _group_id(host: str) -> str | None:
 def _fetch_via_public_api(host: str, group_id: str) -> Iterator[dict[str, Any]] | None:
     """Returns None (not a generator) if this tenant blocks the public
     API, so the caller can fall back to sitemap scraping instead."""
-    probe = fetch_json_with_retry(
-        "GET",
-        f"https://{host}/api/apply/v2/jobs",
-        params={"domain": group_id, "start": 0, "num": 1},
-        retries=1,
-    )
+    try:
+        probe = fetch_json_with_retry(
+            "GET",
+            f"https://{host}/api/apply/v2/jobs",
+            params={"domain": group_id, "start": 0, "num": 1},
+            retries=1,
+            raise_on_404=False,
+        )
+    except Exception:
+        # Some tenants block this endpoint outright (WAF/403, not just a
+        # 200-with-"Not authorized" body) - jseek's own PcsxStableBlock
+        # case, confirmed live for lam-research (403 Forbidden). Either
+        # shape means the same thing: fall back to sitemap scraping.
+        return None
     if isinstance(probe, dict) and "Not authorized" in str(probe.get("message", "")):
         return None
     return _public_api_postings(host, group_id)
