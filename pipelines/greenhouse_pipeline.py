@@ -87,7 +87,11 @@ def postings_resource():
             for p in postings:
                 external_ids_seen.append(p["external_id"])
                 yield {
-                    "employer_id": employer.id,
+                    # employer_id (the real uuid FK) is deliberately not
+                    # written here - dlt also refuses a direct varchar-typed
+                    # INSERT/UPDATE into a uuid column, not just the merge
+                    # JOIN. A trigger (0008 migration) derives it from
+                    # employer_id_key on every insert/update instead.
                     "employer_id_key": employer.id,
                     "external_id": p["external_id"],
                     "title": p["title"],
