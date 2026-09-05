@@ -74,7 +74,18 @@ def _upsert_description(job_posting_external_id: str, employer_id: str, content:
     # of writing it into our single jsonb column.
     columns={"raw_payload": {"data_type": "json"}},
 )
-def postings_resource():
+def postings_resource(completed: list[dict]):
+    """`completed` collects per-employer results as a side effect during
+    dlt's extract phase. Closure/location-normalization/description-capture
+    all read job_postings, but dlt fully exhausts this generator (across
+    every employer) *before* normalizing/loading anything into the
+    destination - calling those here, inline, would run them against a
+    table that doesn't yet have this run's rows (proven: only postings
+    left over from an *earlier* run's commit ever got a description; every
+    employer freshly loaded by the same run silently got skipped). They
+    now run in `run()`, after `pipeline.run()` returns and the data is
+    actually committed.
+    """
     employers = _active_employers("greenhouse")
     print(f"[greenhouse] {len(employers)} active employer(s) to fetch", flush=True)
     for employer in employers:
@@ -107,11 +118,13 @@ def postings_resource():
                     "raw_payload": p,
                 }
             complete_scrape_run(run_id, status="success", postings_found=len(postings))
-            apply_closure(employer.id, external_ids_seen, run_status="success")
-            apply_location_normalization(employer.id)
-            for p in postings:
-                if p.get("description_text"):
-                    _upsert_description(p["external_id"], employer.id, p["description_text"])
+            completed.append(
+                {
+                    "employer_id": employer.id,
+                    "external_ids_seen": external_ids_seen,
+                    "postings": postings,
+                }
+            )
         except Exception as exc:
             print(f"[greenhouse] {employer.slug}: FAILED - {exc}", flush=True)
             complete_scrape_run(run_id, status="failed", error_message=str(exc))
@@ -125,9 +138,19 @@ def run() -> None:
         destination=get_dlt_destination(),
         dataset_name="public",
     )
-    load_info = pipeline.run(postings_resource(), table_name="job_postings")
+    completed: list[dict] = []
+    load_info = pipeline.run(postings_resource(completed), table_name="job_postings")
     print("[greenhouse] pipeline finished", flush=True)
     print(load_info, flush=True)
+
+    for result in completed:
+        employer_id = result["employer_id"]
+        apply_closure(employer_id, result["external_ids_seen"], run_status="success")
+        apply_location_normalization(employer_id)
+        for p in result["postings"]:
+            if p.get("description_text"):
+                _upsert_description(p["external_id"], employer_id, p["description_text"])
+    print(f"[greenhouse] post-processing complete for {len(completed)} employer(s)", flush=True)
 
 
 if __name__ == "__main__":
