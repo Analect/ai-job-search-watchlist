@@ -54,12 +54,22 @@ def fetch_json_with_retry(
     retries: int = 3,
     base_delay: float = 0.5,
     raise_on_404: bool = True,
+    retryable_403: bool = False,
 ) -> dict | list:
     """GET/POST with jseek's retry policy: retryable statuses get
     exponential backoff with jitter (base_delay * 2**attempt, +/- 50%
     jitter — matching their own "1-2s, 2-4s for 3 attempts" shape); a
     404 raises BoardGoneError immediately (never retried — the board is
     gone, not transiently failing); other non-2xx statuses fail fast.
+
+    A 403 raises AntiBotBlockedError immediately by default (confirmed
+    live: lam-research/Eightfold). Oracle HCM is a documented exception
+    — jseek's own postmortem (Albertsons #6394) confirms Oracle's shared
+    multi-tenant infrastructure produces transient Akamai 403s that
+    succeed on an identical retry, unlike a sustained WAF block. Pass
+    `retryable_403=True` to retry a 403 like any other transient status
+    instead of failing immediately, only raising AntiBotBlockedError
+    once retries are exhausted.
     """
     last_exc: Exception | None = None
     for attempt in range(retries):
@@ -72,7 +82,7 @@ def fetch_json_with_retry(
         else:
             if resp.status_code == 404 and raise_on_404:
                 raise BoardGoneError(f"{url} returned 404")
-            if resp.status_code == 403:
+            if resp.status_code == 403 and not retryable_403:
                 raise AntiBotBlockedError(
                     f"anti-bot block (403) for {url} — every ATS endpoint "
                     "this project calls is public/unauthenticated, so a "
@@ -80,7 +90,7 @@ def fetch_json_with_retry(
                 )
             if resp.ok:
                 return resp.json()
-            if not _is_retryable_status(resp.status_code):
+            if resp.status_code != 403 and not _is_retryable_status(resp.status_code):
                 resp.raise_for_status()
             last_exc = requests.HTTPError(f"{resp.status_code} for {url}")
 
@@ -88,4 +98,8 @@ def fetch_json_with_retry(
             delay = base_delay * (2**attempt) * random.uniform(0.75, 1.25)
             time.sleep(delay)
 
+    if retryable_403 and last_exc is not None and "403" in str(last_exc):
+        raise AntiBotBlockedError(
+            f"anti-bot block (403, persisted after {retries} retries) for {url}"
+        )
     raise PaginationFetchError(f"fetch failed for {url} after {retries} attempts: {last_exc}")
