@@ -1,12 +1,19 @@
 """T042: combined enrichment pass - embeddings (T040) + key_terms
-(T041) - over open postings needing enrichment (enrich_version null or
-older than CURRENT_ENRICH_VERSION).
+(T041) - over open, London/Dublin postings needing enrichment
+(enrich_version null or older than CURRENT_ENRICH_VERSION).
 
 Plain script, not dlt-wrapped: unlike the 8 ATS adapters, this job
 reads/updates rows already in job_postings via direct Bedrock calls and
 a TF-IDF pass — it never fetches-and-merges from an external paginated
 API, so dlt's resource/merge abstraction doesn't fit the same way it
 does for ingest (see 20260906-phase4-enrichment-and-similarity.md).
+
+Scoped to `location_city in ('London', 'Dublin')` — of 5,150 open
+postings, only 1,326 are London/Dublin (the other ~3,824 are either a
+different resolved city or, mostly, a worldwide-scope adapter that
+never resolved a city at all). The watchlist's actual focus is
+London/Dublin (FR-003); enriching every worldwide posting would be
+~4x the Bedrock cost for postings the user isn't filtering to.
 """
 
 from pipelines.common.db import get_connection
@@ -23,6 +30,7 @@ def _postings_needing_enrichment() -> list[str]:
             """
             select id from job_postings
             where status = 'open'
+              and location_city in ('London', 'Dublin')
               and (enrich_version is null or enrich_version < %s)
             order by posted_date desc nulls last
             """,
