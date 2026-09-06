@@ -32,12 +32,18 @@ def apply_closure(employer_id: UUID, external_ids_seen: list[str], run_status: s
                 """,
                 (str(employer_id), external_ids_seen),
             )
+            # Reopen a posting re-seen after a prior run missed it (e.g. one
+            # transient API blip) — found via T039 verification: without
+            # this, a posting that vanishes for exactly one run stays
+            # 'closed' forever even though every later run keeps seeing it.
             cur.execute(
                 """
                 update job_postings
-                   set missing_count = 0
+                   set missing_count = 0,
+                       status = 'open'
                  where employer_id = %s
                    and external_id = any(%s)
+                   and status = 'closed'
                 """,
                 (str(employer_id), external_ids_seen),
             )
