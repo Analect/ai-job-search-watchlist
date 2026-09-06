@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 
-import { ApiError, fetchPostings, type PostingSummary, type ReviewState } from "@/lib/api";
+import {
+  ApiError,
+  fetchPostings,
+  fetchSimilar,
+  markForAdvancement,
+  type PostingSummary,
+  type ReviewState,
+  type SimilarPosting,
+} from "@/lib/api";
 
 const PAGE_SIZE = 25;
 
@@ -30,29 +38,119 @@ function formatDate(iso: string | null): string {
   });
 }
 
-function PostingRow({ posting }: { posting: PostingSummary }) {
+function SimilarPanel({ postingId }: { postingId: string }) {
+  const [results, setResults] = useState<SimilarPosting[] | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSimilar(postingId)
+      .then((res) => {
+        if (cancelled) return;
+        setResults(res.results);
+        setMessage(res.message ?? null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : (err as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [postingId]);
+
+  if (error) return <p className="text-sm text-danger">{error}</p>;
+  if (results === null) return <p className="text-sm text-muted">Finding similar postings…</p>;
+  if (results.length === 0) {
+    return (
+      <p className="text-sm text-muted">{message ?? "No similar postings found yet."}</p>
+    );
+  }
+  return (
+    <ul className="space-y-2">
+      {results.map((s) => (
+        <li key={s.id} className="flex items-center justify-between gap-3 text-sm">
+          <a
+            href={s.source_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-ink hover:text-accent hover:underline"
+          >
+            {s.title} <span className="text-muted">— {s.employer_name}</span>
+          </a>
+          <span className="whitespace-nowrap text-xs text-muted">
+            {(s.similarity_score * 100).toFixed(0)}% match
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PostingRow({
+  posting,
+  expanded,
+  flagging,
+  onToggleSimilar,
+  onFlag,
+}: {
+  posting: PostingSummary;
+  expanded: boolean;
+  flagging: boolean;
+  onToggleSimilar: () => void;
+  onFlag: () => void;
+}) {
   const location =
     posting.location_city ?? (posting.location_country ? posting.location_country : "—");
   return (
-    <tr className="border-b border-border-subtle last:border-b-0">
-      <td className="py-3 pr-4">
-        <a
-          href={posting.source_url}
-          target="_blank"
-          rel="noreferrer"
-          className="font-medium text-ink hover:text-accent hover:underline"
-        >
-          {posting.title}
-        </a>
-        <p className="text-xs text-muted">{posting.employer_name}</p>
-      </td>
-      <td className="py-3 pr-4 text-sm text-muted">{location}</td>
-      <td className="py-3 pr-4 text-sm text-muted">{formatDate(posting.posted_date)}</td>
-      <td className="py-3 pr-4 text-sm capitalize text-muted">{posting.status}</td>
-      <td className="py-3">
-        <ReviewBadge state={posting.review_state} />
-      </td>
-    </tr>
+    <>
+      <tr className="border-b border-border-subtle last:border-b-0">
+        <td className="py-3 pr-4">
+          <a
+            href={posting.source_url}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-ink hover:text-accent hover:underline"
+          >
+            {posting.title}
+          </a>
+          <p className="text-xs text-muted">{posting.employer_name}</p>
+        </td>
+        <td className="py-3 pr-4 text-sm text-muted">{location}</td>
+        <td className="py-3 pr-4 text-sm text-muted">{formatDate(posting.posted_date)}</td>
+        <td className="py-3 pr-4 text-sm capitalize text-muted">{posting.status}</td>
+        <td className="py-3 pr-4">
+          <ReviewBadge state={posting.review_state} />
+        </td>
+        <td className="py-3">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onFlag}
+              disabled={flagging || posting.review_state === "flagged_for_advancement"}
+              className="rounded-card border border-ok px-2 py-1 text-xs font-medium text-ok disabled:opacity-40"
+            >
+              {posting.review_state === "flagged_for_advancement" ? "Flagged" : "Flag"}
+            </button>
+            <button
+              type="button"
+              onClick={onToggleSimilar}
+              className="rounded-card border border-border-subtle px-2 py-1 text-xs font-medium text-muted"
+            >
+              {expanded ? "Hide similar" : "Similar"}
+            </button>
+          </div>
+        </td>
+      </tr>
+      {expanded ? (
+        <tr className="border-b border-border-subtle last:border-b-0">
+          <td colSpan={6} className="px-4 py-3" style={{ background: "var(--bg)" }}>
+            <SimilarPanel postingId={posting.id} />
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 
@@ -67,6 +165,29 @@ export default function PostingsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [flaggingId, setFlaggingId] = useState<string | null>(null);
+  const [flagError, setFlagError] = useState<string | null>(null);
+
+  const flagPosting = (id: string) => {
+    setFlaggingId(id);
+    setFlagError(null);
+    markForAdvancement(id)
+      .then(() => {
+        // Optimistic, matching HistorySidebar's rename pattern elsewhere
+        // in this codebase — the badge should update immediately, not
+        // wait for a full refetch of the current page.
+        setResults((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, review_state: "flagged_for_advancement" } : p)),
+        );
+        setExpandedId(id); // surface "similar" postings right after flagging
+      })
+      .catch((err) => {
+        setFlagError(err instanceof ApiError ? err.message : (err as Error).message);
+      })
+      .finally(() => setFlaggingId(null));
+  };
 
   // Any filter change resets pagination — staying on page 3 of a
   // now-different result set would silently show the wrong slice.
@@ -155,6 +276,9 @@ export default function PostingsPage() {
           <p className="py-6 text-center text-sm text-muted">No postings match these filters.</p>
         ) : (
           <>
+            {flagError ? (
+              <p className="mb-3 text-sm text-danger">Flag failed: {flagError}</p>
+            ) : null}
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-border-subtle text-xs font-medium uppercase tracking-wide text-muted">
@@ -162,12 +286,20 @@ export default function PostingsPage() {
                   <th className="pb-2 pr-4 font-medium">Location</th>
                   <th className="pb-2 pr-4 font-medium">Posted</th>
                   <th className="pb-2 pr-4 font-medium">Status</th>
-                  <th className="pb-2 font-medium">Review</th>
+                  <th className="pb-2 pr-4 font-medium">Review</th>
+                  <th className="pb-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {results.map((p) => (
-                  <PostingRow key={p.id} posting={p} />
+                  <PostingRow
+                    key={p.id}
+                    posting={p}
+                    expanded={expandedId === p.id}
+                    flagging={flaggingId === p.id}
+                    onToggleSimilar={() => setExpandedId((cur) => (cur === p.id ? null : p.id))}
+                    onFlag={() => flagPosting(p.id)}
+                  />
                 ))}
               </tbody>
             </table>
