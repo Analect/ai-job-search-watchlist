@@ -22,6 +22,19 @@ class BoardGoneError(Exception):
     distinct from a transient failure (jseek's own BoardGoneError)."""
 
 
+class AntiBotBlockedError(Exception):
+    """A 403 from a public, unauthenticated ATS endpoint (confirmed
+    live: lam-research's Eightfold-hosted career site returns a
+    CloudFront/WAF-style block page under sustained request volume).
+    Every endpoint this project talks to is a public careers page with
+    no auth, so a 403 is itself a reliable anti-bot signal, not an
+    ordinary permission error - raised with a clear, greppable message
+    so `employers.last_error ILIKE '%anti-bot%'` is a standing query for
+    which employers are hard to collect from, for case-by-case review
+    (2026-09-06 decision: chase the ~95% that work cleanly, don't spend
+    effort defeating anti-bot measures on the remainder)."""
+
+
 class PaginationFetchError(Exception):
     """Retries exhausted without a usable response."""
 
@@ -59,6 +72,12 @@ def fetch_json_with_retry(
         else:
             if resp.status_code == 404 and raise_on_404:
                 raise BoardGoneError(f"{url} returned 404")
+            if resp.status_code == 403:
+                raise AntiBotBlockedError(
+                    f"anti-bot block (403) for {url} — every ATS endpoint "
+                    "this project calls is public/unauthenticated, so a "
+                    "403 here means bot-detection, not a real permission error"
+                )
             if resp.ok:
                 return resp.json()
             if not _is_retryable_status(resp.status_code):

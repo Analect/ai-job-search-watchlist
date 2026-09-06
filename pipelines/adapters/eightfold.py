@@ -48,7 +48,7 @@ from typing import Any
 
 import requests
 
-from pipelines.common.http_retry import fetch_json_with_retry
+from pipelines.common.http_retry import AntiBotBlockedError, fetch_json_with_retry
 from pipelines.common.target_cities import TARGET_CITIES
 from pipelines.common.text_clean import clean_description, clean_text
 from pipelines.common.types import Employer
@@ -61,9 +61,24 @@ _SITEMAP_JOB_URL_RE = re.compile(r"<loc>\s*(https?://[^<]*?/careers/job/[^<]+)\s
 _JOB_ID_FROM_URL_RE = re.compile(r"/careers/job/(\d+)")
 
 
+def _raise_for_status_checking_block(resp: requests.Response) -> None:
+    """Same anti-bot signal as fetch_json_with_retry, for the raw HTML/
+    sitemap fetches in the fallback path that don't go through it -
+    every endpoint here is a public careers page, so a 403 means
+    bot-detection (confirmed live: lam-research's WAF), not a real
+    permission error."""
+    if resp.status_code == 403:
+        raise AntiBotBlockedError(
+            f"anti-bot block (403) for {resp.url} — every ATS endpoint this "
+            "project calls is public/unauthenticated, so a 403 here means "
+            "bot-detection, not a real permission error"
+        )
+    resp.raise_for_status()
+
+
 def _group_id(host: str) -> str | None:
     resp = requests.get(f"https://{host}/careers", timeout=30)
-    resp.raise_for_status()
+    _raise_for_status_checking_block(resp)
     match = _GROUP_ID_RE.search(resp.text)
     return match.group(1) if match else None
 
@@ -150,9 +165,29 @@ def _public_api_postings(host: str, group_id: str) -> Iterator[dict[str, Any]]:
                 break
 
 
+def _extract_jobposting(data: object) -> dict | None:
+    """Job pages' JSON-LD isn't consistently a single JobPosting dict
+    across all ~1,373 lam-research pages - some wrap it in a list or a
+    `@graph` array alongside other schema.org types (BreadcrumbList,
+    Organization). Search defensively rather than assume the shape."""
+    if isinstance(data, dict):
+        if data.get("@type") == "JobPosting":
+            return data
+        graph = data.get("@graph")
+        if isinstance(graph, list):
+            return _extract_jobposting(graph)
+        return None
+    if isinstance(data, list):
+        for item in data:
+            found = _extract_jobposting(item)
+            if found:
+                return found
+    return None
+
+
 def _sitemap_postings(host: str) -> Iterator[dict[str, Any]]:
     resp = requests.get(f"https://{host}/careers/sitemap.xml", timeout=30)
-    resp.raise_for_status()
+    _raise_for_status_checking_block(resp)
     urls = sorted(set(_SITEMAP_JOB_URL_RE.findall(resp.text)))
     for url in urls:
         job_id_match = _JOB_ID_FROM_URL_RE.search(url)
@@ -160,17 +195,38 @@ def _sitemap_postings(host: str) -> Iterator[dict[str, Any]]:
             continue
         try:
             page = requests.get(url, timeout=30)
-            page.raise_for_status()
+            # AntiBotBlockedError is deliberately NOT a RequestException
+            # subclass, so it propagates out of this except clause rather
+            # than being silently swallowed as a per-page skip - a WAF
+            # block must fail the whole employer loudly (confirmed live:
+            # lam-research's sitemap fallback silently "completed" at
+            # 164/1373 postings with no visible error before this fix,
+            # because the block was being caught right here).
+            _raise_for_status_checking_block(page)
         except requests.RequestException:
             continue
-        jsonld_match = _JSONLD_RE.search(page.text)
-        if not jsonld_match:
+        posting = None
+        for block in _JSONLD_RE.findall(page.text):
+            try:
+                candidate = _extract_jobposting(json.loads(block))
+            except json.JSONDecodeError:
+                continue
+            if candidate:
+                posting = candidate
+                break
+        if not posting:
             continue
-        try:
-            posting = json.loads(jsonld_match.group(1))
-        except json.JSONDecodeError:
-            continue
-        address = (posting.get("jobLocation") or {}).get("address") or {}
+        job_location = posting.get("jobLocation") or {}
+        if isinstance(job_location, list):
+            # schema.org permits jobLocation as an array for multi-location
+            # postings - take the first, consistent with every other
+            # adapter's "primary location" convention.
+            job_location = job_location[0] if job_location else {}
+        address = job_location.get("address") or {} if isinstance(job_location, dict) else {}
+        if isinstance(address, list):
+            address = address[0] if address else {}
+        if not isinstance(address, dict):
+            address = {}
         country = address.get("addressCountry")
         country_name = country.get("name") if isinstance(country, dict) else country
         yield {
