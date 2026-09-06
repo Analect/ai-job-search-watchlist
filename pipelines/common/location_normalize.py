@@ -13,8 +13,22 @@ import re
 
 from pipelines.common.db import get_connection
 
-_LONDON = re.compile(r"\blondon\b", re.IGNORECASE)
-_DUBLIN = re.compile(r"\bdublin\b", re.IGNORECASE)
+# Real captured location_raw strings routinely list London/Dublin as one
+# entry in a multi-city list ("New York, London", "Dubai, London, Paris,
+# Hong Kong, Sydney, Toronto", "San Francisco, Dublin, Ireland, London, UK")
+# - a plain \bword\b substring search matches those correctly, but also
+# incorrectly matches a city name embedded in an unrelated street/place
+# name in the same shape ("Lowestoft, London Road North" - confirmed live
+# in Workday's own location facet data). jseek's own location resolver
+# tokenizes before matching for exactly this reason (see
+# core/location_resolve.py) - borrowing that principle without their full
+# GeoNames machinery: split on common delimiters and require an
+# INDIVIDUAL segment to equal the city name exactly, not just contain it.
+_SPLIT_RE = re.compile(r",|;| - |\bor\b", re.IGNORECASE)
+
+
+def _segments(location_raw: str) -> list[str]:
+    return [s.strip().casefold() for s in _SPLIT_RE.split(location_raw) if s.strip()]
 
 
 def normalize_location(location_raw: str | None) -> tuple[str | None, str | None, str | None]:
@@ -22,9 +36,10 @@ def normalize_location(location_raw: str | None) -> tuple[str | None, str | None
     location_raw is empty or doesn't match the London/Dublin gazetteer."""
     if not location_raw:
         return (None, None, None)
-    if _LONDON.search(location_raw):
+    segments = _segments(location_raw)
+    if "london" in segments or "greater london" in segments:
         return ("London", "England", "United Kingdom")
-    if _DUBLIN.search(location_raw):
+    if "dublin" in segments:
         return ("Dublin", "Leinster", "Ireland")
     return (None, None, None)
 
