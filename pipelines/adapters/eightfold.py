@@ -20,6 +20,17 @@ tenants rather than assumed to work identically:
    the full HTML description (the list response's own job_description
    field is always empty - confirmed live, matches jseek's own
    PCSX-doesn't-return-descriptions note).
+
+   The list endpoint also accepts a `location=` query param, confirmed
+   live and already noted in `20260904-shortlist-direct-api-coverage.md`
+   before this adapter was even built (`location=London` correctly
+   filtered to 36/217 of Millennium's postings). Used as a server-side
+   pre-filter, same principle as Workday's `locations` facet: one query
+   per `TARGET_CITIES` entry (repeated/comma-separated `location=`
+   values gave inconsistent results when tested live - only the first
+   repeated param was honored, and a comma-joined value returned a
+   count matching neither city individually - so each city is queried
+   separately and merged/deduped, not combined into one request).
 2. **Sitemap + JSON-LD fallback** (needed for lam-research: its tenant
    returns `{"message": "Not authorized for PCSX"}` for the public API
    regardless of host): `GET /careers/sitemap.xml` for the full job URL
@@ -38,6 +49,7 @@ from typing import Any
 import requests
 
 from pipelines.common.http_retry import fetch_json_with_retry
+from pipelines.common.target_cities import TARGET_CITIES
 from pipelines.common.text_clean import clean_description, clean_text
 from pipelines.common.types import Employer
 
@@ -79,53 +91,63 @@ def _fetch_via_public_api(host: str, group_id: str) -> Iterator[dict[str, Any]] 
 
 
 def _public_api_postings(host: str, group_id: str) -> Iterator[dict[str, Any]]:
-    start = 0
-    page_size = 100
-    while True:
-        data = fetch_json_with_retry(
-            "GET",
-            f"https://{host}/api/apply/v2/jobs",
-            params={"domain": group_id, "start": start, "num": page_size},
-        )
-        positions = data.get("positions", [])
-        for pos in positions:
-            job_id = pos.get("id")
-            description_text = None
-            try:
-                detail = fetch_json_with_retry(
-                    "GET",
-                    f"https://{host}/api/apply/v2/jobs/{job_id}",
-                    params={"domain": group_id},
-                    retries=1,
-                    raise_on_404=False,
-                )
-                description_text = clean_description(detail.get("job_description"))
-            except Exception:
-                pass
-            t_create = pos.get("t_create")
-            yield {
-                "external_id": str(job_id),
-                "title": clean_text(pos.get("name")),
-                "source_url": pos.get("canonicalPositionUrl"),
-                "location_raw": clean_text(", ".join(pos.get("locations") or [])),
-                "department": clean_text(pos.get("department")),
-                "is_remote": (pos.get("work_location_option") == "remote") or None,
-                "posted_date": None
-                if not t_create
-                else datetime.fromtimestamp(t_create, tz=UTC).date().isoformat(),
-                "description_text": description_text,
-            }
-        if not positions:
-            break
-        # The API silently caps each page at some server-side size
-        # regardless of the requested `num` (confirmed live: num=100
-        # still returns only 10 positions/page) - advance by the
-        # actual count returned, and stop once we've reached the
-        # response's own reported total rather than trusting `num`.
-        start += len(positions)
-        total = data.get("count")
-        if total is not None and start >= total:
-            break
+    seen_ids: set[str] = set()
+    for city in TARGET_CITIES:
+        start = 0
+        page_size = 100
+        while True:
+            data = fetch_json_with_retry(
+                "GET",
+                f"https://{host}/api/apply/v2/jobs",
+                params={
+                    "domain": group_id,
+                    "start": start,
+                    "num": page_size,
+                    "location": city.title(),
+                },
+            )
+            positions = data.get("positions", [])
+            for pos in positions:
+                job_id = pos.get("id")
+                if job_id is None or str(job_id) in seen_ids:
+                    continue  # a job could plausibly list more than one target city
+                seen_ids.add(str(job_id))
+                description_text = None
+                try:
+                    detail = fetch_json_with_retry(
+                        "GET",
+                        f"https://{host}/api/apply/v2/jobs/{job_id}",
+                        params={"domain": group_id},
+                        retries=1,
+                        raise_on_404=False,
+                    )
+                    description_text = clean_description(detail.get("job_description"))
+                except Exception:
+                    pass
+                t_create = pos.get("t_create")
+                yield {
+                    "external_id": str(job_id),
+                    "title": clean_text(pos.get("name")),
+                    "source_url": pos.get("canonicalPositionUrl"),
+                    "location_raw": clean_text(", ".join(pos.get("locations") or [])),
+                    "department": clean_text(pos.get("department")),
+                    "is_remote": (pos.get("work_location_option") == "remote") or None,
+                    "posted_date": None
+                    if not t_create
+                    else datetime.fromtimestamp(t_create, tz=UTC).date().isoformat(),
+                    "description_text": description_text,
+                }
+            if not positions:
+                break
+            # The API silently caps each page at some server-side size
+            # regardless of the requested `num` (confirmed live: num=100
+            # still returns only 10 positions/page) - advance by the
+            # actual count returned, and stop once we've reached the
+            # response's own reported total rather than trusting `num`.
+            start += len(positions)
+            total = data.get("count")
+            if total is not None and start >= total:
+                break
 
 
 def _sitemap_postings(host: str) -> Iterator[dict[str, Any]]:

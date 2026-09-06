@@ -4,16 +4,19 @@ Adapters land location_raw (and any source-provided structured fields)
 verbatim at capture time — never transforming inside the resource
 itself (the dlt-pipeline research doc's "raw + view" lesson). This
 pass fills location_city/region/country for rows a platform only
-returned as freetext (e.g. Workday's locationsText), using a fixed
-London/Dublin gazetteer. A location that genuinely can't be resolved
-is left null — visible via location_raw, never dropped or guessed.
+returned as freetext (e.g. Workday's locationsText), using the shared
+`TARGET_CITIES` gazetteer (pipelines/common/target_cities.py — extend
+the watchlist to a new city by adding it there, not here). A location
+that genuinely can't be resolved is left null — visible via
+location_raw, never dropped or guessed.
 """
 
 import re
 
 from pipelines.common.db import get_connection
+from pipelines.common.target_cities import CITY_ALIASES, TARGET_CITIES
 
-# Real captured location_raw strings routinely list London/Dublin as one
+# Real captured location_raw strings routinely list a target city as one
 # entry in a multi-city list ("New York, London", "Dubai, London, Paris,
 # Hong Kong, Sydney, Toronto", "San Francisco, Dublin, Ireland, London, UK")
 # - a plain \bword\b substring search matches those correctly, but also
@@ -33,14 +36,15 @@ def _segments(location_raw: str) -> list[str]:
 
 def normalize_location(location_raw: str | None) -> tuple[str | None, str | None, str | None]:
     """Returns (city, region, country) — or (None, None, None) if
-    location_raw is empty or doesn't match the London/Dublin gazetteer."""
+    location_raw is empty or doesn't match any city in TARGET_CITIES."""
     if not location_raw:
         return (None, None, None)
     segments = _segments(location_raw)
-    if "london" in segments or "greater london" in segments:
-        return ("London", "England", "United Kingdom")
-    if "dublin" in segments:
-        return ("Dublin", "Leinster", "Ireland")
+    for segment in segments:
+        key = CITY_ALIASES.get(segment, segment)
+        if key in TARGET_CITIES:
+            region, country = TARGET_CITIES[key]
+            return (key.title(), region, country)
     return (None, None, None)
 
 
