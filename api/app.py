@@ -13,11 +13,19 @@ enrichment pass, and mcp_server/server.py already use.
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel
 
 from pipelines.common.db import get_connection
+from pipelines.common.events import VALID_EVENT_TYPES, mark_for_advancement
 from pipelines.common.postings import get_job_detail, list_postings
+from pipelines.common.similarity import find_similar
 
 app = FastAPI(title="job-search-api")
+
+
+class PostingEventRequest(BaseModel):
+    event_type: str
+    note: str | None = None
 
 
 @app.get("/healthz")
@@ -68,3 +76,19 @@ def get_posting_detail(posting_id: UUID) -> dict:
     if detail is None:
         raise HTTPException(status_code=404, detail="posting not found")
     return detail
+
+
+@app.post("/postings/{posting_id}/events")
+def post_posting_event(posting_id: UUID, body: PostingEventRequest) -> dict:
+    if body.event_type not in VALID_EVENT_TYPES:
+        raise HTTPException(status_code=422, detail=f"invalid event_type: {body.event_type!r}")
+    if get_job_detail(posting_id) is None:
+        raise HTTPException(status_code=404, detail="posting not found")
+    return mark_for_advancement(posting_id, body.event_type, source="user", note=body.note)
+
+
+@app.get("/postings/{posting_id}/similar")
+def get_similar_postings(posting_id: UUID, limit: int = Query(default=5, ge=1, le=50)) -> dict:
+    if get_job_detail(posting_id) is None:
+        raise HTTPException(status_code=404, detail="posting not found")
+    return find_similar(job_posting_id=posting_id, limit=limit)
