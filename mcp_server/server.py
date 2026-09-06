@@ -24,6 +24,7 @@ installed package, not assumed from the version pin.
 from uuid import UUID
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 from pipelines.common.events import mark_for_advancement as _mark_for_advancement
 from pipelines.common.postings import get_job_detail as _get_job_detail
@@ -98,7 +99,21 @@ def find_similar(id: str | None = None, limit: int = 5) -> dict:
     return _find_similar(job_posting_id=posting_id, limit=limit)
 
 
-app = mcp.streamable_http_app(stateless_http=True)
+# Found live (2026-09-06): the default TransportSecuritySettings
+# (DNS-rebinding protection, allowed_hosts=[]) rejects every real
+# request with "Invalid Host header" once anything other than
+# 127.0.0.1 is calling it — including the real gateway hostname.
+# Disabled explicitly rather than trying to enumerate every Host
+# header this server could see (the external gateway hostname, an
+# in-cluster Service DNS name, ...): this protection exists to stop a
+# malicious webpage's browser JS from reaching a locally-bound dev
+# server, which doesn't apply here — every real caller already goes
+# through AgentGateway's own Keycloak-JWT + OpenFGA enforcement before
+# a request reaches this server at all (research.md §8, FR-020).
+app = mcp.streamable_http_app(
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
