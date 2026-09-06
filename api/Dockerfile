@@ -9,7 +9,9 @@ ENV PYTHONUNBUFFERED=1
 RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "fastapi>=0.115" \
     "uvicorn[standard]>=0.30" \
-    "psycopg2-binary>=2.9"
+    "psycopg2-binary>=2.9" \
+    "scikit-learn>=1.5" \
+    "umap-learn>=0.5"
 COPY pipelines/common/ pipelines/common/
 COPY pipelines/__init__.py pipelines/__init__.py
 COPY api/ api/

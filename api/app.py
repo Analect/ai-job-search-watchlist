@@ -15,10 +15,12 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
+from api.map_projection import get_projection
 from pipelines.common.db import get_connection
 from pipelines.common.events import VALID_EVENT_TYPES, mark_for_advancement
 from pipelines.common.postings import get_job_detail, list_postings
 from pipelines.common.similarity import find_similar
+from pipelines.common.watchlist import add_to_watchlist
 
 app = FastAPI(title="job-search-api")
 
@@ -92,3 +94,16 @@ def get_similar_postings(posting_id: UUID, limit: int = Query(default=5, ge=1, l
     if get_job_detail(posting_id) is None:
         raise HTTPException(status_code=404, detail="posting not found")
     return find_similar(job_posting_id=posting_id, limit=limit)
+
+
+@app.get("/map/coordinates")
+def get_map_coordinates() -> dict:
+    return {"companies": get_projection()}
+
+
+@app.post("/watchlist/{slug}")
+def post_watchlist(slug: str) -> dict:
+    result = add_to_watchlist(slug)
+    if result is None:
+        raise HTTPException(status_code=404, detail="company not found")
+    return result
