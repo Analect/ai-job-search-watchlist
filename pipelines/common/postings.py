@@ -1,7 +1,8 @@
-"""job-search-api.contract.md GET /postings and GET /postings/{id}:
-the SINGLE read implementation, shared by api/app.py's routes and (per
-research.md §11) mcp_server/server.py's future get_job_detail tool —
-same convention as events.py/similarity.py.
+"""job-search-api.contract.md GET /postings and GET /postings/{id}, and
+mcp-server-tools.contract.md's search_jobs/get_job_detail: the SINGLE
+read implementation, shared by api/app.py's routes and
+mcp_server/server.py's tools (research.md §11) — same convention as
+events.py/similarity.py.
 """
 
 from uuid import UUID
@@ -110,6 +111,84 @@ def list_postings(
         ],
         "total": total,
     }
+
+
+def search_jobs(
+    query: str | None = None,
+    location: str | None = None,
+    company: str | None = None,
+    status: str | None = "open",
+    limit: int = 20,
+) -> dict:
+    """mcp-server-tools.contract.md's search_jobs — a distinct shape
+    from list_postings() (a `company` filter, `status` defaulting to
+    'open' not any, no offset/review_state, and an explicit
+    empty-result message) rather than the same function with different
+    defaults, since the two contracts genuinely diverged."""
+    limit = min(max(limit, 1), 100)
+    params = {
+        "query": query,
+        "location": location,
+        "company": company,
+        "status": status,
+        "limit": limit,
+    }
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select
+                jp.id, e.name, jp.title, jp.location_city, jp.location_country,
+                jp.posted_date, jp.status, jp.source_url
+            from job_postings jp
+            join employers e on e.id = jp.employer_id
+            where 1=1
+              and (%(status)s is null or jp.status = %(status)s)
+              and (
+                  %(location)s is null
+                  or (%(location)s = 'london' and jp.location_city = 'London')
+                  or (%(location)s = 'dublin' and jp.location_city = 'Dublin')
+                  or (
+                      %(location)s = 'other'
+                      and jp.location_city is not null
+                      and jp.location_city not in ('London', 'Dublin')
+                  )
+              )
+              and (
+                  %(query)s is null
+                  or jp.title ilike '%%' || %(query)s || '%%'
+                  or jp.department ilike '%%' || %(query)s || '%%'
+                  or exists (
+                      select 1 from unnest(jp.key_terms) t where t ilike '%%' || %(query)s || '%%'
+                  )
+              )
+              and (
+                  %(company)s is null
+                  or e.name ilike '%%' || %(company)s || '%%'
+                  or e.slug ilike '%%' || %(company)s || '%%'
+              )
+            order by jp.posted_date desc nulls last, jp.first_seen_at desc
+            limit %(limit)s
+            """,
+            params,
+        )
+        rows = cur.fetchall()
+
+    results = [
+        {
+            "id": r[0],
+            "employer_name": r[1],
+            "title": r[2],
+            "location_city": r[3],
+            "location_country": r[4],
+            "posted_date": r[5],
+            "status": r[6],
+            "source_url": r[7],
+        }
+        for r in rows
+    ]
+    if not results:
+        return {"results": [], "message": "no postings matched"}
+    return {"results": results}
 
 
 def get_job_detail(job_posting_id: UUID | str) -> dict | None:
