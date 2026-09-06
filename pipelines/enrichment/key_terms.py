@@ -42,7 +42,7 @@ def enrich_key_terms(job_posting_ids: list[str]) -> None:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select jp.id, coalesce(d.content, jp.title)
+            select jp.id, coalesce(nullif(d.content, ''), jp.title)
             from job_postings jp
             left join descriptions d on d.job_posting_id = jp.id and d.locale = 'en'
             where jp.id = any(%s::uuid[])

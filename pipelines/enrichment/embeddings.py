@@ -60,7 +60,7 @@ def embed_postings(job_posting_ids: list[str]) -> None:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select jp.id, coalesce(d.content, jp.title)
+            select jp.id, coalesce(nullif(d.content, ''), jp.title)
             from job_postings jp
             left join descriptions d on d.job_posting_id = jp.id and d.locale = 'en'
             where jp.id = any(%s::uuid[])
@@ -69,7 +69,21 @@ def embed_postings(job_posting_ids: list[str]) -> None:
         )
         rows = cur.fetchall()
         for posting_id, text in rows:
-            embedding = embed_text(html_to_text(text))
+            plain_text = html_to_text(text)
+            if not plain_text:
+                # Found live: a genuinely empty-after-stripping text
+                # (e.g. an HTML description that renders to nothing
+                # visible) crashes the whole batch otherwise — Titan v2
+                # rejects an empty inputText outright. Skip this one
+                # posting rather than losing the rest of the batch,
+                # matching every ATS adapter's own per-item isolation.
+                print(f"[enrichment] {posting_id}: empty text after cleanup, skipping", flush=True)
+                continue
+            try:
+                embedding = embed_text(plain_text)
+            except Exception as exc:
+                print(f"[enrichment] {posting_id}: embedding failed - {exc}", flush=True)
+                continue
             # psycopg2 has no native pgvector adapter — format explicitly
             # as vector's own text input syntax and cast, rather than
             # adding the `pgvector` package just for this one write.

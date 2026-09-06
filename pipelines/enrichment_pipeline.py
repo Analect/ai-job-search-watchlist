@@ -57,9 +57,18 @@ def run() -> None:
     print(f"[enrichment] {len(ids)} posting(s) need enrichment", flush=True)
     for i in range(0, len(ids), BATCH_SIZE):
         batch = ids[i : i + BATCH_SIZE]
-        embed_postings(batch)
-        enrich_key_terms(batch)
-        _mark_enriched(batch)
+        try:
+            embed_postings(batch)
+            enrich_key_terms(batch)
+            _mark_enriched(batch)
+        except Exception as exc:
+            # One bad batch (found live: TF-IDF's fit_transform can
+            # still raise on a pathological all-empty-after-cleanup
+            # batch) must not lose the whole run's progress on every
+            # other batch — same per-item isolation philosophy as every
+            # ATS adapter's own try/except-per-employer.
+            print(f"[enrichment] batch {i}-{i + len(batch)} failed - {exc}", flush=True)
+            continue
         print(f"[enrichment] {min(i + BATCH_SIZE, len(ids))}/{len(ids)} done", flush=True)
     print("[enrichment] finished", flush=True)
 
