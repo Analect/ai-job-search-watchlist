@@ -10,6 +10,7 @@ connection helper — the same DSN convention every adapter, the
 enrichment pass, and mcp_server/server.py already use.
 """
 
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query
@@ -22,7 +23,21 @@ from pipelines.common.postings import get_job_detail, list_postings
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist
 
-app = FastAPI(title="job-search-api")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warm GET /map/coordinates' TF-IDF+UMAP cache during pod
+    # startup/readiness, not on the first real request — found live
+    # (2026-09-06): the cold computation (~13s, longer under this pod's
+    # CPU limit) 504'd through the real gateway when it ran on-demand.
+    # uvicorn doesn't accept connections until this completes, so
+    # Kubernetes' readiness probe correctly reports NotReady during
+    # this window instead of the gateway timing out a live request.
+    get_projection()
+    yield
+
+
+app = FastAPI(title="job-search-api", lifespan=lifespan)
 
 
 class PostingEventRequest(BaseModel):
