@@ -60,7 +60,7 @@ def embed_postings(job_posting_ids: list[str]) -> None:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select jp.id, coalesce(nullif(d.content, ''), jp.title)
+            select jp.id, coalesce(nullif(d.content, ''), jp.title), jp.title
             from job_postings jp
             left join descriptions d on d.job_posting_id = jp.id and d.locale = 'en'
             where jp.id = any(%s::uuid[])
@@ -68,15 +68,18 @@ def embed_postings(job_posting_ids: list[str]) -> None:
             (job_posting_ids,),
         )
         rows = cur.fetchall()
-        for posting_id, text in rows:
+        for posting_id, text, title in rows:
             plain_text = html_to_text(text)
             if not plain_text:
-                # Found live: a genuinely empty-after-stripping text
-                # (e.g. an HTML description that renders to nothing
-                # visible) crashes the whole batch otherwise — Titan v2
-                # rejects an empty inputText outright. Skip this one
-                # posting rather than losing the rest of the batch,
-                # matching every ATS adapter's own per-item isolation.
+                # Found live: some descriptions are non-empty but strip
+                # to nothing (e.g. markup with no visible text) —
+                # nullif only catches a genuinely empty string, not
+                # this case. Fall back to the title before giving up.
+                plain_text = html_to_text(title)
+            if not plain_text:
+                # Titan v2 rejects an empty inputText outright — skip
+                # this one posting rather than losing the rest of the
+                # batch, matching every ATS adapter's per-item isolation.
                 print(f"[enrichment] {posting_id}: empty text after cleanup, skipping", flush=True)
                 continue
             try:

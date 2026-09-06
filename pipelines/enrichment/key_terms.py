@@ -42,7 +42,7 @@ def enrich_key_terms(job_posting_ids: list[str]) -> None:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select jp.id, coalesce(nullif(d.content, ''), jp.title)
+            select jp.id, coalesce(nullif(d.content, ''), jp.title), jp.title
             from job_postings jp
             left join descriptions d on d.job_posting_id = jp.id and d.locale = 'en'
             where jp.id = any(%s::uuid[])
@@ -53,7 +53,10 @@ def enrich_key_terms(job_posting_ids: list[str]) -> None:
         if not rows:
             return
         ids = [r[0] for r in rows]
-        texts = [html_to_text(r[1]) for r in rows]
+        # A description can be non-empty but strip to nothing (e.g.
+        # markup with no visible text) — fall back to the title, same
+        # as embeddings.py's identical fix.
+        texts = [html_to_text(content) or html_to_text(title) for _, content, title in rows]
         key_terms_list = extract_key_terms(texts)
         for posting_id, key_terms in zip(ids, key_terms_list, strict=True):
             cur.execute(
