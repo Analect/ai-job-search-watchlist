@@ -201,5 +201,128 @@ def _(mo, results, total):
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        # Company similarity map prototype (T048)
+
+        Reproduces `20260904-company-landscape-mapping.md`'s validated
+        TF-IDF (1-2 grams) -> UMAP (cosine) 2D projection over the live
+        `jseek_companies`/`jseek_company_descriptions` tables (research.md
+        §12 - live tables, not the original static-Parquet plan), before
+        it's coded into `api/map_projection.py` (T049).
+        """
+    )
+    return
+
+
+@app.cell
+def _(get_connection, pd):
+    with get_connection() as _conn:
+        companies_df = pd.read_sql(
+            """
+            select c.slug, c.name, d.description
+            from jseek_companies c
+            join jseek_company_descriptions d on d.company_slug = c.slug and d.locale = 'en'
+            join jseek_industries i on i.id = c.industry_id
+            where i.name in ('Technology', 'Financial Services', 'Professional Services')
+              and d.description is not null and d.description != ''
+            """,
+            _conn,
+        )
+    companies_df
+    return (companies_df,)
+
+
+@app.cell
+def _(companies_df):
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    _vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2, stop_words="english")
+    tfidf_matrix = _vectorizer.fit_transform(companies_df["description"])
+    tfidf_matrix.shape
+    return (tfidf_matrix,)
+
+
+@app.cell
+def _(companies_df, tfidf_matrix):
+    from umap import UMAP
+
+    _reducer = UMAP(n_components=2, metric="cosine", random_state=42)
+    coords = _reducer.fit_transform(tfidf_matrix)
+    projected_df = companies_df.assign(x=coords[:, 0], y=coords[:, 1])
+    projected_df[["slug", "name", "x", "y"]]
+    return (projected_df,)
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        """
+        ## Validation: reproduce the doc's known clustering
+
+        Same check as the original doc's own validation (within-group vs.
+        control-group distance ratio) - confirming this live re-run
+        reproduces the same qualitative result (a ratio clearly > 1,
+        ideally in the same ballpark as the ~4.3x UMAP result already
+        reported) before trusting this method for the real API.
+        """
+    )
+    return
+
+
+@app.cell
+def _(mo, projected_df):
+    import numpy as np
+
+    def _group_coords(slugs):
+        rows = projected_df[projected_df["slug"].isin(slugs)]
+        return rows[["x", "y"]].to_numpy()
+
+    def _mean_pairwise_distance(points):
+        if len(points) < 2:
+            return None
+        dists = [
+            np.linalg.norm(points[i] - points[j])
+            for i in range(len(points))
+            for j in range(i + 1, len(points))
+        ]
+        return sum(dists) / len(dists)
+
+    _groups = {
+        "Quant funds": [
+            "jane-street",
+            "two-sigma",
+            "g-research",
+            "citadel",
+            "millennium-management",
+        ],
+        "AI labs": ["openai", "anthropic", "anyscale", "modal", "deepmind"],
+        "Bulge-bracket banks": ["jpmorgan", "morgan-stanley", "goldman-sachs", "citigroup"],
+    }
+    _all_points = projected_df[["x", "y"]].to_numpy()
+    _overall_spread = _mean_pairwise_distance(_all_points)
+
+    _rows = []
+    for _label, _slugs in _groups.items():
+        _pts = _group_coords(_slugs)
+        _within = _mean_pairwise_distance(_pts)
+        _rows.append(
+            {
+                "group": _label,
+                "companies_found": len(_pts),
+                "within_group_distance": _within,
+                "overall_spread": _overall_spread,
+                "ratio (lower = tighter cluster)": None
+                if _within is None
+                else round(_within / _overall_spread, 3),
+            }
+        )
+
+    mo.ui.table(_rows)
+    return
+
+
 if __name__ == "__main__":
     app.run()
