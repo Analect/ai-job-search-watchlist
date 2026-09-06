@@ -28,7 +28,29 @@ def clean_text(value: str | None) -> str | None:
 
 def clean_description(html: str | None) -> str | None:
     """Strip stray WYSIWYG toggle-anchor artifacts from an HTML job
-    description. Returns the input unchanged if it's empty."""
+    description. Returns the input unchanged if it's empty — this
+    deliberately keeps the HTML intact (job-search-web renders it as
+    rich text), it does not produce plain text. Use html_to_text() for
+    that (TF-IDF/embeddings input, where tags/inline-styles are noise,
+    not signal)."""
     if not html:
         return html
     return _STRAY_TOGGLE_RE.sub("", html)
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_ENTITY_RE = re.compile(r"&(amp|lt|gt|quot|#39|nbsp);")
+_ENTITY_MAP = {"amp": "&", "lt": "<", "gt": ">", "quot": '"', "#39": "'", "nbsp": " "}
+
+
+def html_to_text(html: str | None) -> str:
+    """Plain text for text-analysis input (TF-IDF, embeddings) — strips
+    tags/attributes entirely (found necessary via T040/T041's own live
+    test: descriptions.content is stored as HTML, and inline
+    style="min-height:5em" attributes were polluting TF-IDF's top terms
+    with 'min height'/'5em'/'style' instead of real skill terms)."""
+    if not html:
+        return ""
+    text = _TAG_RE.sub(" ", html)
+    text = _ENTITY_RE.sub(lambda m: _ENTITY_MAP[m.group(1)], text)
+    return " ".join(text.split())
