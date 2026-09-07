@@ -199,16 +199,13 @@ def _(get_connection, mo, np, pd):
 
 @app.cell
 def _(mo, projection_df):
-    if projection_df is None:
-        mo.md("")
-    else:
-        mo.ui.altair_chart(
-            __import__("altair")
-            .Chart(projection_df)
-            .mark_circle(size=80)
-            .encode(x="x", y="y", color="employer", tooltip=["employer"])
-            .properties(width=600, height=400)
-        )
+    mo.ui.altair_chart(
+        __import__("altair")
+        .Chart(projection_df)
+        .mark_circle(size=80)
+        .encode(x="x", y="y", color="employer", tooltip=["employer"])
+        .properties(width=600, height=400)
+    ) if projection_df is not None else mo.md("")
     return
 
 
