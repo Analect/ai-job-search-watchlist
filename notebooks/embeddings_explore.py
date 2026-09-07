@@ -42,6 +42,11 @@ def _():
 
 @app.cell
 def _():
+    import os
+    import sys
+
+    sys.path.insert(0, os.getcwd())
+
     import numpy as np
     import pandas as pd
 
@@ -72,13 +77,13 @@ def _(get_connection, mo):
 def _(get_connection, pd):
     with get_connection() as _conn, _conn.cursor() as _cur:
         _cur.execute(
-            """
-            select jp.id, e.name as employer, jp.title, jp.location
+            '''
+            select jp.id, e.name as employer, jp.title, jp.location_raw
               from job_postings jp
               join employers e on e.id = jp.employer_id
              where jp.status = 'open' and jp.embedding is not null
              order by e.name, jp.title
-            """
+            '''
         )
         _rows = _cur.fetchall()
 
@@ -98,7 +103,7 @@ def _(mo, postings_df):
 
 
 @app.cell
-def _(get_connection, mo, neighbour_limit, np, posting_picker):
+def _(get_connection, mo, neighbour_limit, np, pd, posting_picker):
     if posting_picker.value is None:
         mo.md("*Pick a posting above.*")
         neighbours_df = None
@@ -110,7 +115,7 @@ def _(get_connection, mo, neighbour_limit, np, posting_picker):
             target_embedding = _cur.fetchone()[0]
 
             _cur.execute(
-                """
+                '''
                 select jp.id, e.name, jp.title, jp.embedding <=> %s as distance
                   from job_postings jp
                   join employers e on e.id = jp.employer_id
@@ -119,23 +124,23 @@ def _(get_connection, mo, neighbour_limit, np, posting_picker):
                    and jp.id != %s
                  order by jp.embedding <=> %s
                  limit %s
-                """,
+                ''',
                 (target_embedding, posting_picker.value, target_embedding, neighbour_limit.value),
             )
             _rows = _cur.fetchall()
 
-        import pandas as pd
-
         neighbours_df = pd.DataFrame(_rows, columns=["id", "employer", "title", "cosine_distance"])
         neighbours_df["similarity"] = 1 - neighbours_df["cosine_distance"]
 
-        vec = np.array(target_embedding)
+        # psycopg2 has no native pgvector adapter -- target_embedding is the
+        # column's text literal ("[0.1,0.2,...]"), not a Python list of floats.
+        vec = np.array([float(x) for x in target_embedding.strip("[]").split(",")])
         mo.md(
             f"Target embedding: {vec.shape[0]} dims, L2 norm {np.linalg.norm(vec):.3f} "
             "(Titan v2 embeddings are not unit-normalized by the API — this is expected, "
             "not a data-quality signal)."
         )
-    return neighbours_df, pd
+    return (neighbours_df,)
 
 
 @app.cell
@@ -164,12 +169,12 @@ def _(mo):
 def _(get_connection, mo, np, pd):
     with get_connection() as _conn, _conn.cursor() as _cur:
         _cur.execute(
-            """
+            '''
             select jp.id, e.name as employer, jp.embedding
               from job_postings jp
               join employers e on e.id = jp.employer_id
              where jp.status = 'open' and jp.embedding is not null
-            """
+            '''
         )
         _rows = _cur.fetchall()
 
@@ -178,7 +183,9 @@ def _(get_connection, mo, np, pd):
         projection_df = None
     else:
         ids, employers, vectors = zip(*_rows)
-        matrix = np.array(vectors)
+        # psycopg2 has no native pgvector adapter -- embedding comes back as
+        # its text literal ("[0.1,0.2,...]"), not a Python list of floats.
+        matrix = np.array([[float(x) for x in v.strip("[]").split(",")] for v in vectors])
         centered = matrix - matrix.mean(axis=0)
         # Plain PCA via SVD -- no sklearn dependency needed for a 2-component
         # projection, matching this notebook's own "cheapest possible" framing.
@@ -206,14 +213,11 @@ def _(mo, projection_df):
 
 
 @app.cell(hide_code=True)
-def _():
-    import marimo as mo
-
-    mo.md(
-        "T065 live proof: this cell was added via marimo-pair against the "
-        "marimohub-poweruser sandbox, not typed by a human in the browser editor."
-    )
-    return (mo,)
+def _(mo):
+    mo.md("""
+    T065 live proof: this cell was added via marimo-pair against the marimohub-poweruser sandbox, not typed by a human in the browser editor.
+    """)
+    return
 
 
 if __name__ == "__main__":
