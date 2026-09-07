@@ -11,8 +11,8 @@
 
 import marimo
 
-__generated_with = "0.23.2"
-app = marimo.App(width="medium")
+__generated_with = "0.23.10"
+app = marimo.App(width="medium", auto_download=["html"])
 
 
 @app.cell
@@ -65,7 +65,7 @@ def _(get_connection, mo):
         if any are open at all).
         """
     )
-    return embedded_count, open_count
+    return
 
 
 @app.cell
@@ -135,7 +135,7 @@ def _(get_connection, mo, neighbour_limit, np, posting_picker):
             "(Titan v2 embeddings are not unit-normalized by the API — this is expected, "
             "not a data-quality signal)."
         )
-    return neighbours_df, target_embedding, vec
+    return neighbours_df, pd
 
 
 @app.cell
@@ -146,19 +146,17 @@ def _(mo, neighbours_df):
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        ## 2D projection (PCA)
+    mo.md("""
+    ## 2D projection (PCA)
 
-        A quick sanity-check scatter, not a polished visualization —
-        `map_projection.py` (`api/map_projection.py`) already does the
-        rigorous TF-IDF+UMAP version for company *descriptions*; this
-        cell answers a narrower question: does the *posting embedding*
-        space show any obvious employer clustering on its own, using
-        the cheapest possible projection (PCA, no extra dependency
-        beyond what's already installed for `numpy`/`pandas`).
-        """
-    )
+    A quick sanity-check scatter, not a polished visualization —
+    `map_projection.py` (`api/map_projection.py`) already does the
+    rigorous TF-IDF+UMAP version for company *descriptions*; this
+    cell answers a narrower question: does the *posting embedding*
+    space show any obvious employer clustering on its own, using
+    the cheapest possible projection (PCA, no extra dependency
+    beyond what's already installed for `numpy`/`pandas`).
+    """)
     return
 
 
@@ -189,7 +187,7 @@ def _(get_connection, mo, np, pd):
         projection_df = pd.DataFrame(
             {"employer": employers, "x": coords[:, 0], "y": coords[:, 1]}
         )
-    return coords, employers, ids, matrix, projection_df, vectors
+    return (projection_df,)
 
 
 @app.cell
@@ -205,6 +203,17 @@ def _(mo, projection_df):
             .properties(width=600, height=400)
         )
     return
+
+
+@app.cell(hide_code=True)
+def _():
+    import marimo as mo
+
+    mo.md(
+        "T065 live proof: this cell was added via marimo-pair against the "
+        "marimohub-poweruser sandbox, not typed by a human in the browser editor."
+    )
+    return (mo,)
 
 
 if __name__ == "__main__":
