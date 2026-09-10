@@ -91,6 +91,25 @@ returning collection_supported
 """
 
 
+def remove_from_watchlist(slug: str) -> dict | None:
+    """Set employers.short_listed = false for this slug.
+    Returns None if the slug isn't in the employers table at all.
+    Idempotent — removing an already-unwatched employer is a no-op beyond
+    re-asserting short_listed=false, mirroring add_to_watchlist's convention.
+    """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update employers set short_listed = false where slug = %s returning slug",
+            (slug,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        conn.commit()
+    return {"slug": slug, "short_listed": False}
+
+
 def add_to_watchlist(slug: str) -> dict | None:
     """Idempotent by construction (FR-017): a duplicate add is a no-op
     beyond re-asserting short_listed=true. Returns None if `slug` isn't

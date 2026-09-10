@@ -1,13 +1,30 @@
 """job-search-api.contract.md GET /postings and GET /postings/{id}, and
 mcp-server-tools.contract.md's search_jobs/get_job_detail: the SINGLE
 read implementation, shared by api/app.py's routes and
-mcp_server/server.py's tools (research.md §11) — same convention as
-events.py/similarity.py.
+mcp_server/server.py's tools — same convention as events.py/similarity.py.
+
+017-enhanced-job-search (T006/T016): returns new review-state columns
+(reviewed, flagged, promoted, thumbs, comment, location_unknown) and a
+derived priority-ordered review_state label; filters on the boolean
+columns directly instead of deriving state from job_events.
 """
 
 from uuid import UUID
 
 from pipelines.common.db import get_connection
+
+# Derived review_state label — priority order: promoted > flagged >
+# thumbs_up/thumbs_down > reviewed > unreviewed (research.md §1).
+_REVIEW_STATE_CASE = """
+    case
+        when jp.promoted then 'promoted'
+        when jp.flagged   then 'flagged'
+        when jp.thumbs = 'up'   then 'thumbs_up'
+        when jp.thumbs = 'down' then 'thumbs_down'
+        when jp.reviewed  then 'reviewed'
+        else 'unreviewed'
+    end
+"""
 
 _FILTERS_SQL = """
     and (%(status)s is null or jp.status = %(status)s)
@@ -17,27 +34,32 @@ _FILTERS_SQL = """
         or (%(location)s = 'dublin' and jp.location_city = 'Dublin')
         or (
             %(location)s = 'other'
-            and jp.location_city is not null
-            and jp.location_city not in ('London', 'Dublin')
+            and (
+                jp.location_city is null
+                or jp.location_city not in ('London', 'Dublin')
+            )
         )
     )
     and (
         %(review_state)s is null
-        or coalesce(le.event_type, 'unreviewed') = %(review_state)s
+        or (%(review_state)s = 'unreviewed'  and jp.reviewed = false and jp.flagged = false and jp.promoted = false and jp.thumbs is null)
+        or (%(review_state)s = 'reviewed'    and jp.reviewed = true)
+        or (%(review_state)s = 'flagged'     and jp.flagged  = true)
+        or (%(review_state)s = 'promoted'    and jp.promoted = true)
+        or (%(review_state)s = 'thumbs_up'   and jp.thumbs = 'up')
+        or (%(review_state)s = 'thumbs_down' and jp.thumbs = 'down')
     )
     and (
         %(query)s is null
         or jp.title ilike '%%' || %(query)s || '%%'
         or jp.department ilike '%%' || %(query)s || '%%'
         or exists (select 1 from unnest(jp.key_terms) t where t ilike '%%' || %(query)s || '%%')
-    )
-"""
-
-_LATEST_EVENT_CTE = """
-    with latest_event as (
-        select distinct on (job_posting_id) job_posting_id, event_type
-        from job_events
-        order by job_posting_id, created_at desc
+        or exists (
+            select 1 from descriptions d
+             where d.job_posting_id = jp.id
+               and d.locale = 'en'
+               and d.content ilike '%%' || %(query)s || '%%'
+        )
     )
 """
 
@@ -61,20 +83,21 @@ def list_postings(
 
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            _LATEST_EVENT_CTE
-            + """
+            f"""
             select
                 jp.id, e.name, jp.title, jp.location_city, jp.location_country,
-                jp.posted_date, jp.status, coalesce(le.event_type, 'unreviewed'),
+                jp.posted_date, jp.status,
+                jp.reviewed, jp.flagged, jp.promoted, jp.thumbs,
+                jp.location_city is null as location_unknown,
+                {_REVIEW_STATE_CASE} as review_state,
                 jp.source_url
             from job_postings jp
             join employers e on e.id = jp.employer_id
-            left join latest_event le on le.job_posting_id = jp.id
             where 1=1
             """
             + _FILTERS_SQL
             + """
-            order by jp.posted_date desc nulls last
+            order by jp.posted_date desc nulls last, jp.id
             limit %(limit)s offset %(offset)s
             """,
             params,
@@ -82,11 +105,9 @@ def list_postings(
         rows = cur.fetchall()
 
         cur.execute(
-            _LATEST_EVENT_CTE
-            + """
+            f"""
             select count(*)
             from job_postings jp
-            left join latest_event le on le.job_posting_id = jp.id
             where 1=1
             """
             + _FILTERS_SQL,
@@ -104,13 +125,40 @@ def list_postings(
                 "location_country": r[4],
                 "posted_date": r[5],
                 "status": r[6],
-                "review_state": r[7],
-                "source_url": r[8],
+                "reviewed": r[7],
+                "flagged": r[8],
+                "promoted": r[9],
+                "thumbs": r[10],
+                "location_unknown": r[11],
+                "review_state": r[12],
+                "source_url": r[13],
             }
             for r in rows
         ],
         "total": total,
     }
+
+
+def bulk_mark_reviewed(posting_ids: list[str]) -> int:
+    """Set reviewed=true on every listed posting not already reviewed.
+    Returns the count actually flipped (idempotent — no-op on already-
+    reviewed or unknown IDs, per FR-009a).
+    """
+    if not posting_ids:
+        return 0
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update job_postings
+               set reviewed = true
+             where id = any(%s::uuid[])
+               and reviewed = false
+            """,
+            (posting_ids,),
+        )
+        count = cur.rowcount
+        conn.commit()
+    return count
 
 
 def search_jobs(
@@ -149,8 +197,10 @@ def search_jobs(
                   or (%(location)s = 'dublin' and jp.location_city = 'Dublin')
                   or (
                       %(location)s = 'other'
-                      and jp.location_city is not null
-                      and jp.location_city not in ('London', 'Dublin')
+                      and (
+                          jp.location_city is null
+                          or jp.location_city not in ('London', 'Dublin')
+                      )
                   )
               )
               and (
@@ -160,13 +210,19 @@ def search_jobs(
                   or exists (
                       select 1 from unnest(jp.key_terms) t where t ilike '%%' || %(query)s || '%%'
                   )
+                  or exists (
+                      select 1 from descriptions d
+                       where d.job_posting_id = jp.id
+                         and d.locale = 'en'
+                         and d.content ilike '%%' || %(query)s || '%%'
+                  )
               )
               and (
                   %(company)s is null
                   or e.name ilike '%%' || %(company)s || '%%'
                   or e.slug ilike '%%' || %(company)s || '%%'
               )
-            order by jp.posted_date desc nulls last, jp.first_seen_at desc
+            order by jp.posted_date desc nulls last, jp.id
             limit %(limit)s
             """,
             params,
@@ -194,12 +250,15 @@ def search_jobs(
 def get_job_detail(job_posting_id: UUID | str) -> dict | None:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """
+            f"""
             select jp.id, jp.employer_id, e.name, jp.title, jp.source_url,
                    jp.location_raw, jp.location_city, jp.location_region,
                    jp.location_country, jp.is_remote, jp.employment_type,
                    jp.department, jp.posted_date, jp.status, jp.key_terms,
-                   jp.first_seen_at, jp.last_seen_at
+                   jp.first_seen_at, jp.last_seen_at,
+                   jp.reviewed, jp.flagged, jp.promoted, jp.thumbs, jp.comment,
+                   jp.location_city is null as location_unknown,
+                   {_REVIEW_STATE_CASE} as review_state
             from job_postings jp
             join employers e on e.id = jp.employer_id
             where jp.id = %s
@@ -246,6 +305,13 @@ def get_job_detail(job_posting_id: UUID | str) -> dict | None:
             "key_terms": row[14],
             "first_seen_at": row[15],
             "last_seen_at": row[16],
+            "reviewed": row[17],
+            "flagged": row[18],
+            "promoted": row[19],
+            "thumbs": row[20],
+            "comment": row[21],
+            "location_unknown": row[22],
+            "review_state": row[23],
         },
         "description": desc_row[0] if desc_row else None,
         "events": [
