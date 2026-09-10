@@ -22,12 +22,17 @@ every call instead — a single cheap `select slug from employers` scan,
 nothing like UMAP's cost.
 """
 
+import numpy as np
+from scipy.cluster.hierarchy import linkage, to_tree
 from sklearn.feature_extraction.text import TfidfVectorizer
 from umap import UMAP
 
 from pipelines.common.db import get_connection
 
 _cache: list[dict] | None = None
+_dendrogram_cache: dict | None = None
+_tfidf_matrix = None
+_tfidf_rows = None
 
 
 def _compute_projection() -> list[dict]:
@@ -56,6 +61,13 @@ def _compute_projection() -> list[dict]:
     descriptions = [r[3] for r in rows]
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=2, stop_words="english")
     tfidf_matrix = vectorizer.fit_transform(descriptions)
+
+    # Store the dense TF-IDF matrix alongside the projection so
+    # get_dendrogram() can reuse it without re-fitting the vectorizer.
+    global _tfidf_matrix, _tfidf_rows
+    _tfidf_matrix = tfidf_matrix.toarray().astype(np.float32)
+    _tfidf_rows = rows
+
     reducer = UMAP(n_components=2, metric="cosine", random_state=42)
     coords = reducer.fit_transform(tfidf_matrix)
 
@@ -85,3 +97,35 @@ def get_projection(refresh: bool = False) -> list[dict]:
 
     short_listed = _fetch_short_listed_slugs()
     return [{**company, "short_listed": company["slug"] in short_listed} for company in _cache]
+
+
+def _node_to_dict(node, slugs: list[str]) -> dict:
+    if node.is_leaf():
+        return {"slug": slugs[node.id], "distance": 0.0}
+    return {
+        "distance": float(node.dist),
+        "left": _node_to_dict(node.get_left(), slugs),
+        "right": _node_to_dict(node.get_right(), slugs),
+    }
+
+
+def get_dendrogram(refresh: bool = False) -> dict:
+    """Return a scipy Ward-linkage dendrogram over the employer TF-IDF
+    matrix, cached alongside the UMAP projection (GET /map/dendrogram,
+    T025).  Triggers a projection rebuild if the cache is cold."""
+    global _dendrogram_cache
+    if _dendrogram_cache is not None and not refresh:
+        return _dendrogram_cache
+
+    # Ensure the TF-IDF matrix is available (it's built by _compute_projection).
+    if _tfidf_matrix is None:
+        get_projection()  # warm both caches
+
+    slugs = [r[0] for r in _tfidf_rows]
+    Z = linkage(_tfidf_matrix, method="ward", metric="euclidean")
+    root, _ = to_tree(Z, rd=True)
+    _dendrogram_cache = {
+        "slugs": slugs,
+        "tree": _node_to_dict(root, slugs),
+    }
+    return _dendrogram_cache
