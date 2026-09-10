@@ -36,7 +36,13 @@ def _segments(location_raw: str) -> list[str]:
 
 def normalize_location(location_raw: str | None) -> tuple[str | None, str | None, str | None]:
     """Returns (city, region, country) — or (None, None, None) if
-    location_raw is empty or doesn't match any city in TARGET_CITIES."""
+    location_raw is empty or doesn't match any city in TARGET_CITIES.
+
+    T049/FR-014: unresolvable locations return (None, None, None) — the
+    posting is NEVER dropped.  Null city_city rows surface under
+    GET /postings?location=other (T016 explicitly matches null cities there).
+    Confirmed live — no code change needed.
+    """
     if not location_raw:
         return (None, None, None)
     segments = _segments(location_raw)

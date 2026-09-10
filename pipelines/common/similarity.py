@@ -33,6 +33,11 @@ def find_similar(job_posting_id: UUID | str | None = None, limit: int = 5) -> di
         target_embedding = target[0]
 
         cur.execute(
+            # T044/FR-022: no employer-scoping WHERE clause here — the search
+            # spans ALL open postings regardless of employer, so similarity
+            # reflects job-content closeness, not "same company" proximity
+            # (research.md §7 confirms no code change needed; this comment
+            # makes the intent explicit and verifiable).
             """
             select jp.id, e.name, jp.title, jp.source_url,
                    jp.embedding <=> %s as distance

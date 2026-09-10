@@ -37,6 +37,12 @@ def extract_key_terms(texts: list[str]) -> list[list[str]]:
 
 
 def enrich_key_terms(job_posting_ids: list[str]) -> None:
+    # T048/FR-012: key_terms IS the technology-tag field used by GET /postings'
+    # `query` search filter (research.md §4).  Input text is descriptions.content
+    # (falling back to jp.title exactly as embeddings.py does) — confirmed live,
+    # no code change needed.  This comment makes the FR-012 contract explicit
+    # so future readers know why key_terms doubles as the technology-tag search
+    # index rather than a separate enrichment pass.
     if not job_posting_ids:
         return
     with get_connection() as conn, conn.cursor() as cur:
