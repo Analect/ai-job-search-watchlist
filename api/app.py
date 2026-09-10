@@ -1,13 +1,19 @@
-"""job-search-api: the direct (non-assistant) path for FR-003, FR-011,
-FR-012, FR-013, FR-014-017 (job-search-api.contract.md).
+"""job-search-api: the direct (non-assistant) path for the job search watchlist.
 
-No auth logic lives here — same convention as
-insurance-support-agent/agent/: the platform gateway in front of this
-Component is what validates the caller's identity.
+017-enhanced-job-search adds:
+  - New event vocabulary (reviewed/flag_on/flag_off/promoted/withdrawn/
+    thumbs_*/comment_updated) routed through the single write path in
+    events.py + applications.py (T005).
+  - POST /postings/bulk-review (T010).
+  - Updated GET /postings review_state filter (T017).
+  - GET /jobs/map/coordinates (T021), GET /jobs/promoted (T022).
+  - GET /employers/{slug}/similar (T024), GET /map/dendrogram (T025).
+  - DELETE /watchlist/{slug} (T032).
+  - GET /applications (T035), POST /applications/{id}/status (T036).
+  - POST /applications/{id}/generate-drafts (T039).
 
-Reuses pipelines/common/db.py (not a separate api/db.py) as its
-connection helper — the same DSN convention every adapter, the
-enrichment pass, and mcp_server/server.py already use.
+No auth logic lives here — the platform gateway validates the caller's
+identity before any request reaches this Component.
 """
 
 from contextlib import asynccontextmanager
@@ -16,24 +22,30 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-from api.map_projection import get_projection
+from api.job_map_projection import get_job_projection
+from api.map_projection import get_dendrogram, get_projection
+from pipelines.common import applications as apps_module
+from pipelines.common.applications import AlreadyActiveError
 from pipelines.common.db import get_connection
+from pipelines.common.employer_similarity import find_similar_employers
 from pipelines.common.events import VALID_EVENT_TYPES, mark_for_advancement
-from pipelines.common.postings import get_job_detail, list_postings
+from pipelines.common.postings import (
+    bulk_mark_reviewed,
+    get_job_detail,
+    list_postings,
+)
 from pipelines.common.similarity import find_similar
-from pipelines.common.watchlist import add_to_watchlist
+from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
+from api.drafting import generate_drafts
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Warm GET /map/coordinates' TF-IDF+UMAP cache during pod
-    # startup/readiness, not on the first real request — found live
-    # (2026-09-06): the cold computation (~13s, longer under this pod's
-    # CPU limit) 504'd through the real gateway when it ran on-demand.
-    # uvicorn doesn't accept connections until this completes, so
-    # Kubernetes' readiness probe correctly reports NotReady during
-    # this window instead of the gateway timing out a live request.
+    # Warm both projection caches during pod startup so the first real
+    # request doesn't hit a cold UMAP computation (504 risk — same fix
+    # already applied for the employer map, now extended to the job map).
     get_projection()
+    get_job_projection()
     yield
 
 
@@ -43,6 +55,14 @@ app = FastAPI(title="job-search-api", lifespan=lifespan)
 class PostingEventRequest(BaseModel):
     event_type: str
     note: str | None = None
+
+
+class BulkReviewRequest(BaseModel):
+    posting_ids: list[str]
+
+
+class ApplicationStatusRequest(BaseModel):
+    status: str
 
 
 @app.get("/healthz")
@@ -71,7 +91,7 @@ def get_postings(
     status: str | None = Query(default=None, pattern="^(open|closed)$"),
     review_state: str | None = Query(
         default=None,
-        pattern="^(unreviewed|flagged_for_advancement|dismissed)$",
+        pattern="^(unreviewed|reviewed|flagged|promoted|thumbs_up|thumbs_down)$",
     ),
     query: str | None = None,
     limit: int = Query(default=50, ge=1, le=500),
@@ -87,6 +107,14 @@ def get_postings(
     )
 
 
+# POST /postings/bulk-review must be declared BEFORE /postings/{posting_id}
+# so FastAPI doesn't try to match "bulk-review" as a UUID.
+@app.post("/postings/bulk-review")
+def post_bulk_review(body: BulkReviewRequest) -> dict:
+    updated = bulk_mark_reviewed(body.posting_ids)
+    return {"updated": updated}
+
+
 @app.get("/postings/{posting_id}")
 def get_posting_detail(posting_id: UUID) -> dict:
     detail = get_job_detail(posting_id)
@@ -99,8 +127,39 @@ def get_posting_detail(posting_id: UUID) -> dict:
 def post_posting_event(posting_id: UUID, body: PostingEventRequest) -> dict:
     if body.event_type not in VALID_EVENT_TYPES:
         raise HTTPException(status_code=422, detail=f"invalid event_type: {body.event_type!r}")
-    if get_job_detail(posting_id) is None:
+
+    detail = get_job_detail(posting_id)
+    if detail is None:
         raise HTTPException(status_code=404, detail="posting not found")
+
+    posting = detail["posting"]
+
+    if body.event_type == "promoted":
+        try:
+            apps_module.create_or_reactivate(posting_id)
+        except AlreadyActiveError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "update job_postings set promoted = true where id = %s", (str(posting_id),)
+            )
+            conn.commit()
+
+    elif body.event_type == "withdrawn":
+        if not posting.get("promoted"):
+            raise HTTPException(
+                status_code=422,
+                detail="posting is not currently promoted; cannot withdraw",
+            )
+        result = apps_module.withdraw(posting_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="no application found for this posting")
+        with get_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "update job_postings set promoted = false where id = %s", (str(posting_id),)
+            )
+            conn.commit()
+
     return mark_for_advancement(posting_id, body.event_type, source="user", note=body.note)
 
 
@@ -111,9 +170,16 @@ def get_similar_postings(posting_id: UUID, limit: int = Query(default=5, ge=1, l
     return find_similar(job_posting_id=posting_id, limit=limit)
 
 
+# --- Employer map / watchlist ---
+
 @app.get("/map/coordinates")
 def get_map_coordinates() -> dict:
     return {"companies": get_projection()}
+
+
+@app.get("/map/dendrogram")
+def get_map_dendrogram() -> dict:
+    return get_dendrogram()
 
 
 @app.post("/watchlist/{slug}")
@@ -122,3 +188,90 @@ def post_watchlist(slug: str) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail="company not found")
     return result
+
+
+@app.delete("/watchlist/{slug}")
+def delete_watchlist(slug: str) -> dict:
+    result = remove_from_watchlist(slug)
+    if result is None:
+        raise HTTPException(status_code=404, detail="company not found")
+    return result
+
+
+@app.get("/employers/{slug}/similar")
+def get_similar_employers(slug: str, limit: int = Query(default=5, ge=1, le=20)) -> dict:
+    return find_similar_employers(slug, limit=limit)
+
+
+# --- Job map / promoted list ---
+
+@app.get("/jobs/map/coordinates")
+def get_job_map_coordinates() -> dict:
+    return {"jobs": get_job_projection()}
+
+
+@app.get("/jobs/promoted")
+def get_promoted_jobs() -> dict:
+    return list_postings(review_state="promoted", limit=500, offset=0)
+
+
+# --- Applications ---
+
+@app.get("/applications")
+def get_applications() -> dict:
+    results = apps_module.list_all()
+    return {"results": results}
+
+
+@app.post("/applications/{job_posting_id}/status")
+def post_application_status(job_posting_id: UUID, body: ApplicationStatusRequest) -> dict:
+    try:
+        result = apps_module.advance_status(job_posting_id, body.status)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="no application found for this posting")
+    return result
+
+
+@app.post("/applications/{job_posting_id}/generate-drafts")
+def post_generate_drafts(job_posting_id: UUID) -> dict:
+    # Idempotent: return existing draft info if already generated.
+    existing = apps_module.get_draft_info(job_posting_id)
+    if existing:
+        return {
+            "status": existing["status"],
+            "resume_draft_branch": existing["resume_draft_branch"],
+            "resume_draft_mr_url": existing["resume_draft_mr_url"],
+            "resume_draft_path": existing["resume_draft_path"],
+            "cover_letter_draft_path": existing["cover_letter_draft_path"],
+            "draft_generated_at": existing["draft_generated_at"],
+        }
+
+    detail = get_job_detail(job_posting_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="posting not found")
+    if detail.get("description") is None:
+        raise HTTPException(
+            status_code=422,
+            detail="cannot draft: no job description captured for this posting",
+        )
+
+    app_row = apps_module.get(job_posting_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="no application found for this posting")
+
+    try:
+        draft = generate_drafts(job_posting_id, detail)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"draft generation failed: {e}")
+
+    apps_module.persist_draft_info(
+        job_posting_id,
+        branch=draft["resume_draft_branch"],
+        mr_url=draft["resume_draft_mr_url"],
+        resume_path=draft["resume_draft_path"],
+        cover_letter_path=draft["cover_letter_draft_path"],
+        generated_at=draft["draft_generated_at"],
+    )
+    return draft

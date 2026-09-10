@@ -79,7 +79,7 @@ def mark_for_advancement(id: str, note: str | None = None) -> dict:
     if _get_job_detail(posting_id) is None:
         return {"error": f"no posting found with id {id!r}"}
     return _mark_for_advancement(
-        posting_id, "flagged_for_advancement", source="assistant", note=note
+        posting_id, "flag_on", source="assistant", note=note
     )
 
 

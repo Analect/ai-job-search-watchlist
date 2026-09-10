@@ -1,7 +1,8 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 
+import ApplicationsPage from "@/pages/ApplicationsPage";
 import PostingsPage from "@/pages/PostingsPage";
-import MapPage from "@/pages/MapPage";
+import WatchlistsPage from "@/pages/WatchlistsPage";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-1.5 rounded-card text-sm font-medium ${
@@ -17,8 +18,11 @@ export default function App() {
           <NavLink to="/postings" className={navLinkClass}>
             Postings
           </NavLink>
-          <NavLink to="/map" className={navLinkClass}>
-            Discover
+          <NavLink to="/watchlists" className={navLinkClass}>
+            Watchlists
+          </NavLink>
+          <NavLink to="/applications" className={navLinkClass}>
+            Applications
           </NavLink>
         </nav>
       </header>
@@ -26,7 +30,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<PostingsPage />} />
           <Route path="/postings" element={<PostingsPage />} />
-          <Route path="/map" element={<MapPage />} />
+          <Route path="/watchlists" element={<WatchlistsPage />} />
+          <Route path="/applications" element={<ApplicationsPage />} />
         </Routes>
       </main>
     </div>
