@@ -1,25 +1,31 @@
 import { useEffect, useState } from "react";
 
+import PostingDetailPane from "@/components/PostingDetailPane";
+import SplitPane from "@/components/SplitPane";
 import {
   ApiError,
+  bulkMarkReviewed,
+  fetchPostingDetail,
   fetchPostings,
-  fetchSimilar,
-  markForAdvancement,
+  postPostingEvent,
+  type PostingDetail,
   type PostingSummary,
   type ReviewState,
-  type SimilarPosting,
 } from "@/lib/api";
 
 const PAGE_SIZE = 25;
 
 const REVIEW_BADGE: Record<ReviewState, { label: string; className: string }> = {
   unreviewed: { label: "Unreviewed", className: "border-border-subtle text-muted" },
-  flagged_for_advancement: { label: "Flagged", className: "border-ok text-ok" },
-  dismissed: { label: "Dismissed", className: "border-danger text-danger" },
+  reviewed: { label: "Reviewed", className: "border-border-subtle text-ink" },
+  flagged: { label: "Flagged", className: "border-ok text-ok" },
+  promoted: { label: "Promoted", className: "border-accent text-accent" },
+  thumbs_up: { label: "👍", className: "border-ok text-ok" },
+  thumbs_down: { label: "👎", className: "border-danger text-danger" },
 };
 
 function ReviewBadge({ state }: { state: ReviewState }) {
-  const badge = REVIEW_BADGE[state];
+  const badge = REVIEW_BADGE[state] ?? REVIEW_BADGE.unreviewed;
   return (
     <span
       className={`whitespace-nowrap rounded-card border px-2 py-0.5 text-xs font-medium ${badge.className}`}
@@ -38,119 +44,64 @@ function formatDate(iso: string | null): string {
   });
 }
 
-function SimilarPanel({ postingId }: { postingId: string }) {
-  const [results, setResults] = useState<SimilarPosting[] | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchSimilar(postingId)
-      .then((res) => {
-        if (cancelled) return;
-        setResults(res.results);
-        setMessage(res.message ?? null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof ApiError ? err.message : (err as Error).message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [postingId]);
-
-  if (error) return <p className="text-sm text-danger">{error}</p>;
-  if (results === null) return <p className="text-sm text-muted">Finding similar postings…</p>;
-  if (results.length === 0) {
-    return (
-      <p className="text-sm text-muted">{message ?? "No similar postings found yet."}</p>
-    );
-  }
-  return (
-    <ul className="space-y-2">
-      {results.map((s) => (
-        <li key={s.id} className="flex items-center justify-between gap-3 text-sm">
-          <a
-            href={s.source_url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-ink hover:text-accent hover:underline"
-          >
-            {s.title} <span className="text-muted">— {s.employer_name}</span>
-          </a>
-          <span className="whitespace-nowrap text-xs text-muted">
-            {(s.similarity_score * 100).toFixed(0)}% match
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function PostingRow({
   posting,
-  expanded,
-  flagging,
-  onToggleSimilar,
-  onFlag,
+  selected,
+  checked,
+  onSelect,
+  onCheck,
 }: {
   posting: PostingSummary;
-  expanded: boolean;
-  flagging: boolean;
-  onToggleSimilar: () => void;
-  onFlag: () => void;
+  selected: boolean;
+  checked: boolean;
+  onSelect: () => void;
+  onCheck: (checked: boolean) => void;
 }) {
   const location =
-    posting.location_city ?? (posting.location_country ? posting.location_country : "—");
+    posting.location_city ??
+    (posting.location_unknown
+      ? "Unknown"
+      : posting.location_country ?? "—");
+
   return (
-    <>
-      <tr className="border-b border-border-subtle last:border-b-0">
-        <td className="py-3 pr-4">
-          <a
-            href={posting.source_url}
-            target="_blank"
-            rel="noreferrer"
-            className="font-medium text-ink hover:text-accent hover:underline"
-          >
-            {posting.title}
-          </a>
-          <p className="text-xs text-muted">{posting.employer_name}</p>
-        </td>
-        <td className="py-3 pr-4 text-sm text-muted">{location}</td>
-        <td className="py-3 pr-4 text-sm text-muted">{formatDate(posting.posted_date)}</td>
-        <td className="py-3 pr-4 text-sm capitalize text-muted">{posting.status}</td>
-        <td className="py-3 pr-4">
-          <ReviewBadge state={posting.review_state} />
-        </td>
-        <td className="py-3">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onFlag}
-              disabled={flagging || posting.review_state === "flagged_for_advancement"}
-              className="rounded-card border border-ok px-2 py-1 text-xs font-medium text-ok disabled:opacity-40"
-            >
-              {posting.review_state === "flagged_for_advancement" ? "Flagged" : "Flag"}
-            </button>
-            <button
-              type="button"
-              onClick={onToggleSimilar}
-              className="rounded-card border border-border-subtle px-2 py-1 text-xs font-medium text-muted"
-            >
-              {expanded ? "Hide similar" : "Similar"}
-            </button>
-          </div>
-        </td>
-      </tr>
-      {expanded ? (
-        <tr className="border-b border-border-subtle last:border-b-0">
-          <td colSpan={6} className="px-4 py-3" style={{ background: "var(--bg)" }}>
-            <SimilarPanel postingId={posting.id} />
-          </td>
-        </tr>
-      ) : null}
-    </>
+    <tr
+      className={`cursor-pointer border-b border-border-subtle last:border-b-0 ${
+        selected ? "bg-accent/5" : "hover:bg-surface/50"
+      }`}
+      onClick={onSelect}
+    >
+      <td className="py-2 pr-2" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onCheck(e.target.checked)}
+          className="rounded"
+        />
+      </td>
+      <td className="py-3 pr-4">
+        <a
+          href={posting.source_url}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="font-medium text-ink hover:text-accent hover:underline"
+        >
+          {posting.title}
+        </a>
+        <p className="text-xs text-muted">{posting.employer_name}</p>
+      </td>
+      <td className="py-3 pr-4 text-sm text-muted">
+        {location}
+        {posting.location_unknown ? (
+          <span className="ml-1 text-xs text-muted/60">(unknown)</span>
+        ) : null}
+      </td>
+      <td className="py-3 pr-4 text-sm text-muted">{formatDate(posting.posted_date)}</td>
+      <td className="py-3 pr-4 text-sm capitalize text-muted">{posting.status}</td>
+      <td className="py-3">
+        <ReviewBadge state={posting.review_state} />
+      </td>
+    </tr>
   );
 }
 
@@ -166,31 +117,15 @@ export default function PostingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [flaggingId, setFlaggingId] = useState<string | null>(null);
-  const [flagError, setFlagError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<PostingDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  const flagPosting = (id: string) => {
-    setFlaggingId(id);
-    setFlagError(null);
-    markForAdvancement(id)
-      .then(() => {
-        // Optimistic, matching HistorySidebar's rename pattern elsewhere
-        // in this codebase — the badge should update immediately, not
-        // wait for a full refetch of the current page.
-        setResults((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, review_state: "flagged_for_advancement" } : p)),
-        );
-        setExpandedId(id); // surface "similar" postings right after flagging
-      })
-      .catch((err) => {
-        setFlagError(err instanceof ApiError ? err.message : (err as Error).message);
-      })
-      .finally(() => setFlaggingId(null));
-  };
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [bulkReviewing, setBulkReviewing] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
 
-  // Any filter change resets pagination — staying on page 3 of a
-  // now-different result set would silently show the wrong slice.
+  // Filter changes reset pagination
   useEffect(() => {
     setOffset(0);
   }, [location, status, reviewState, query]);
@@ -201,7 +136,7 @@ export default function PostingsPage() {
     fetchPostings({
       location: location || undefined,
       status: status || undefined,
-      review_state: reviewState || undefined,
+      review_state: (reviewState as ReviewState) || undefined,
       query: query || undefined,
       limit: PAGE_SIZE,
       offset,
@@ -224,12 +159,90 @@ export default function PostingsPage() {
     };
   }, [location, status, reviewState, query, offset]);
 
+  const selectPosting = (id: string) => {
+    setSelectedId(id);
+    setDetailLoading(true);
+    setDetail(null);
+    fetchPostingDetail(id)
+      .then((d) => {
+        setDetail(d);
+        // Auto-mark reviewed on first open (FR-003)
+        if (!d.posting.reviewed) {
+          postPostingEvent(id, "reviewed").catch(() => null);
+          setResults((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, reviewed: true, review_state: p.review_state === "unreviewed" ? "reviewed" : p.review_state } : p)),
+          );
+        }
+      })
+      .catch(() => null)
+      .finally(() => setDetailLoading(false));
+  };
+
+  const handleStateChange = (id: string, patch: Record<string, unknown>) => {
+    setResults((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const updated = { ...p, ...patch } as PostingSummary;
+        // Recompute derived review_state label
+        if (updated.promoted) updated.review_state = "promoted";
+        else if (updated.flagged) updated.review_state = "flagged";
+        else if (updated.thumbs === "up") updated.review_state = "thumbs_up";
+        else if (updated.thumbs === "down") updated.review_state = "thumbs_down";
+        else if (updated.reviewed) updated.review_state = "reviewed";
+        else updated.review_state = "unreviewed";
+        return updated;
+      }),
+    );
+    // Merge patch into current detail too
+    if (detail && detail.posting.id === id) {
+      setDetail((d) => d ? { ...d, posting: { ...d.posting, ...patch } } : d);
+    }
+  };
+
+  const toggleCheck = (id: string, checked: boolean) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const bulkReview = () => {
+    if (checkedIds.size === 0) return;
+    setBulkReviewing(true);
+    setBulkMessage(null);
+    bulkMarkReviewed([...checkedIds])
+      .then((res) => {
+        setBulkMessage(`Marked ${res.updated} posting${res.updated !== 1 ? "s" : ""} as reviewed.`);
+        setResults((prev) =>
+          prev.map((p) =>
+            checkedIds.has(p.id) && !p.reviewed
+              ? {
+                  ...p,
+                  reviewed: true,
+                  review_state: p.review_state === "unreviewed" ? "reviewed" : p.review_state,
+                }
+              : p,
+          ),
+        );
+        setCheckedIds(new Set());
+      })
+      .catch((err) => {
+        setBulkMessage(
+          `Bulk review failed: ${err instanceof ApiError ? err.message : (err as Error).message}`,
+        );
+      })
+      .finally(() => setBulkReviewing(false));
+  };
+
   const rangeStart = total === 0 ? 0 : offset + 1;
   const rangeEnd = Math.min(offset + PAGE_SIZE, total);
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-card border border-border-subtle bg-surface p-4">
+  const postingsList = (
+    <div className="space-y-3 p-3">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3 rounded-card border border-border-subtle bg-surface p-3">
         <select
           value={location}
           onChange={(e) => setLocation(e.target.value)}
@@ -238,7 +251,7 @@ export default function PostingsPage() {
           <option value="">Any location</option>
           <option value="london">London</option>
           <option value="dublin">Dublin</option>
-          <option value="other">Other</option>
+          <option value="other">Other / Unknown</option>
         </select>
         <select
           value={status}
@@ -256,18 +269,48 @@ export default function PostingsPage() {
         >
           <option value="">Any review state</option>
           <option value="unreviewed">Unreviewed</option>
-          <option value="flagged_for_advancement">Flagged</option>
-          <option value="dismissed">Dismissed</option>
+          <option value="reviewed">Reviewed</option>
+          <option value="flagged">Flagged</option>
+          <option value="promoted">Promoted</option>
+          <option value="thumbs_up">👍 Thumbs up</option>
+          <option value="thumbs_down">👎 Thumbs down</option>
         </select>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search title, department, skills…"
+          placeholder="Search title, description, skills…"
           className="min-w-[220px] flex-1 rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink placeholder:text-muted"
         />
       </div>
 
-      <div className="rounded-card border border-border-subtle bg-surface p-4">
+      {/* Bulk action bar */}
+      {checkedIds.size > 0 ? (
+        <div className="flex items-center gap-3 rounded-card border border-border-subtle bg-surface px-3 py-2">
+          <span className="text-sm text-muted">{checkedIds.size} selected</span>
+          <button
+            type="button"
+            disabled={bulkReviewing}
+            onClick={bulkReview}
+            className="rounded-card border border-border-subtle px-3 py-1 text-sm disabled:opacity-40"
+          >
+            Mark Reviewed
+          </button>
+          <button
+            type="button"
+            onClick={() => setCheckedIds(new Set())}
+            className="text-sm text-muted hover:text-ink"
+          >
+            Clear
+          </button>
+        </div>
+      ) : null}
+
+      {bulkMessage ? (
+        <p className="text-sm text-ink">{bulkMessage}</p>
+      ) : null}
+
+      {/* Table */}
+      <div className="rounded-card border border-border-subtle bg-surface">
         {loading ? (
           <p className="py-6 text-center text-sm text-muted">Loading…</p>
         ) : error ? (
@@ -275,19 +318,16 @@ export default function PostingsPage() {
         ) : results.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted">No postings match these filters.</p>
         ) : (
-          <>
-            {flagError ? (
-              <p className="mb-3 text-sm text-danger">Flag failed: {flagError}</p>
-            ) : null}
+          <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left">
               <thead>
                 <tr className="border-b border-border-subtle text-xs font-medium uppercase tracking-wide text-muted">
+                  <th className="pb-2 pr-2 font-medium" />
                   <th className="pb-2 pr-4 font-medium">Posting</th>
                   <th className="pb-2 pr-4 font-medium">Location</th>
                   <th className="pb-2 pr-4 font-medium">Posted</th>
                   <th className="pb-2 pr-4 font-medium">Status</th>
-                  <th className="pb-2 pr-4 font-medium">Review</th>
-                  <th className="pb-2 font-medium">Actions</th>
+                  <th className="pb-2 font-medium">Review</th>
                 </tr>
               </thead>
               <tbody>
@@ -295,40 +335,60 @@ export default function PostingsPage() {
                   <PostingRow
                     key={p.id}
                     posting={p}
-                    expanded={expandedId === p.id}
-                    flagging={flaggingId === p.id}
-                    onToggleSimilar={() => setExpandedId((cur) => (cur === p.id ? null : p.id))}
-                    onFlag={() => flagPosting(p.id)}
+                    selected={selectedId === p.id}
+                    checked={checkedIds.has(p.id)}
+                    onSelect={() => selectPosting(p.id)}
+                    onCheck={(c) => toggleCheck(p.id, c)}
                   />
                 ))}
               </tbody>
             </table>
-            <div className="mt-4 flex items-center justify-between text-sm text-muted">
-              <span>
-                {rangeStart}–{rangeEnd} of {total}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={offset === 0}
-                  onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-                  className="rounded-card border border-border-subtle px-3 py-1 disabled:opacity-40"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  disabled={rangeEnd >= total}
-                  onClick={() => setOffset((o) => o + PAGE_SIZE)}
-                  className="rounded-card border border-border-subtle px-3 py-1 disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          </>
+          </div>
         )}
+
+        {/* Pagination */}
+        {!loading && !error && total > 0 ? (
+          <div className="flex items-center justify-between p-3 text-sm text-muted">
+            <span>
+              {rangeStart}–{rangeEnd} of {total}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={offset === 0}
+                onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+                className="rounded-card border border-border-subtle px-3 py-1 disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={rangeEnd >= total}
+                onClick={() => setOffset((o) => o + PAGE_SIZE)}
+                className="rounded-card border border-border-subtle px-3 py-1 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
+    </div>
+  );
+
+  return (
+    <div style={{ height: "calc(100vh - 100px)" }}>
+      <SplitPane
+        top={postingsList}
+        bottom={
+          <PostingDetailPane
+            detail={detail}
+            loading={detailLoading}
+            onStateChange={handleStateChange}
+          />
+        }
+        defaultTopPercent={55}
+      />
     </div>
   );
 }
