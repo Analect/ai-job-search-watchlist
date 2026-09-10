@@ -11,7 +11,9 @@ RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "uvicorn[standard]>=0.30" \
     "psycopg2-binary>=2.9" \
     "scikit-learn>=1.5" \
-    "umap-learn>=0.5"
+    "umap-learn>=0.5" \
+    "boto3>=1.34" \
+    "requests>=2.31"
 COPY pipelines/common/ pipelines/common/
 COPY pipelines/__init__.py pipelines/__init__.py
 COPY api/ api/

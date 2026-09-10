@@ -3,7 +3,6 @@ import { useMemo, useRef, useState } from "react";
 import PostingDetailPane from "@/components/PostingDetailPane";
 import SplitPane from "@/components/SplitPane";
 import {
-  ApiError,
   fetchPostingDetail,
   postPostingEvent,
   type MapJob,
