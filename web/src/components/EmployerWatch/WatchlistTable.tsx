@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 
 import {
   ApiError,
@@ -21,6 +21,11 @@ export default function WatchlistTable({ companies, onCompaniesChange }: Watchli
   const [message, setMessage] = useState<string | null>(null);
 
   const showSimilar = (slug: string) => {
+    if (similarFor === slug) {
+      setSimilarFor(null);
+      setSimilarResults([]);
+      return;
+    }
     setSimilarFor(slug);
     setSimilarLoading(true);
     setSimilarResults([]);
@@ -65,8 +70,8 @@ export default function WatchlistTable({ companies, onCompaniesChange }: Watchli
         </thead>
         <tbody>
           {watchlisted.map((c) => (
-            <>
-              <tr key={c.slug} className="border-b border-border-subtle last:border-b-0">
+            <React.Fragment key={c.slug}>
+              <tr className="border-b border-border-subtle last:border-b-0">
                 <td className="py-2 pr-4 font-medium text-ink">{c.name}</td>
                 <td className="py-2 pr-4 text-muted">{c.industry ?? "—"}</td>
                 <td className="py-2 pr-4 text-muted">{c.ats_types ?? "—"}</td>
@@ -90,7 +95,7 @@ export default function WatchlistTable({ companies, onCompaniesChange }: Watchli
                 </td>
               </tr>
               {similarFor === c.slug ? (
-                <tr key={`${c.slug}-similar`} className="border-b border-border-subtle">
+                <tr className="border-b border-border-subtle">
                   <td colSpan={4} className="bg-surface/50 px-4 py-3">
                     {similarLoading ? (
                       <p className="text-xs text-muted">Finding similar companies…</p>
@@ -109,7 +114,7 @@ export default function WatchlistTable({ companies, onCompaniesChange }: Watchli
                   </td>
                 </tr>
               ) : null}
-            </>
+            </React.Fragment>
           ))}
         </tbody>
       </table>

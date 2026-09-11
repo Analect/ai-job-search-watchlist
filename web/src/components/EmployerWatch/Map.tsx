@@ -154,7 +154,7 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
                           opacity={hovered && hovered.slug !== c.slug && !isSelected ? 0.35 : 0.85}
                           onMouseEnter={() => setHovered(c)}
                           onMouseLeave={() => setHovered((h) => (h?.slug === c.slug ? null : h))}
-                          onClick={() => setSelected(c)}
+                          onClick={() => { setSelected(c); setActionMsg(null); }}
                           style={{ cursor: "pointer" }}
                         />
                       );
