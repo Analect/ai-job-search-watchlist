@@ -22,6 +22,14 @@ _GITLAB_API = "https://gitlab.analect.com/api/v4"
 _RESUME_PROJECT = "mccoole%2Fresume"  # URL-encoded project path
 _TYPST_TEMPLATES_PATH = "typst/templates"
 
+# Cross-region inference profile ID. Must be one of the profiles covered by
+# the bedrock-agent-user BedrockInferenceProfiles IAM policy. Override at
+# deploy time via the DRAFTING_MODEL_ID env var (OpenChoreo environmentConfigs
+# or a ConfigMap env entry) to swap models without a code rebuild.
+_DRAFTING_MODEL_ID = os.environ.get(
+    "DRAFTING_MODEL_ID", "us.anthropic.claude-sonnet-4-6"
+)
+
 _bedrock_client = None
 
 
@@ -83,7 +91,7 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
 
     client = _get_bedrock_client()
     response = client.invoke_model(
-        modelId="anthropic.claude-sonnet-4-5",
+        modelId=_DRAFTING_MODEL_ID,
         contentType="application/json",
         accept="application/json",
         body=json.dumps({
@@ -183,4 +191,5 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
         "resume_draft_path": f"typst/{folder}/{resume_filename}",
         "cover_letter_draft_path": f"typst/{folder}/{letter_filename}",
         "draft_generated_at": now.isoformat(),
+        "draft_model_id": _DRAFTING_MODEL_ID,
     }
