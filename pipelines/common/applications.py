@@ -190,6 +190,7 @@ def persist_draft_info(
     resume_path: str,
     cover_letter_path: str,
     generated_at: str,
+    model_id: str | None = None,
 ) -> dict:
     """Persist resume-draft metadata on the applications row after a
     successful generate-drafts call (T039). Also advances status to
@@ -205,6 +206,8 @@ def persist_draft_info(
                    resume_draft_path       = %s,
                    cover_letter_draft_path = %s,
                    draft_generated_at      = %s,
+                   draft_model_id          = %s,
+                   draft_error             = null,
                    updated_at              = now()
              where job_posting_id = %s
             returning id, job_posting_id, status, resume_draft_branch,
@@ -212,7 +215,7 @@ def persist_draft_info(
                       cover_letter_draft_path, draft_generated_at,
                       created_at, updated_at
             """,
-            (branch, mr_url, resume_path, cover_letter_path, generated_at, pid),
+            (branch, mr_url, resume_path, cover_letter_path, generated_at, model_id, pid),
         )
         row = cur.fetchone()
         if row is None:
@@ -229,6 +232,96 @@ def persist_draft_info(
         "cover_letter_draft_path": row[6],
         "draft_generated_at": row[7],
     }
+
+
+def set_draft_pending(job_posting_id: UUID | str) -> dict | None:
+    """Mark draft generation as in-progress: status='drafting', clear all
+    draft fields and any previous error. Returns None if no row exists."""
+    pid = str(job_posting_id)
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update applications
+               set status                  = 'drafting',
+                   resume_draft_branch     = null,
+                   resume_draft_mr_url     = null,
+                   resume_draft_path       = null,
+                   cover_letter_draft_path = null,
+                   draft_generated_at      = null,
+                   draft_model_id          = null,
+                   draft_error             = null,
+                   updated_at              = now()
+             where job_posting_id = %s
+            returning id, job_posting_id, status, resume_draft_mr_url,
+                      draft_generated_at, created_at, updated_at
+            """,
+            (pid,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        conn.commit()
+    return _row_to_dict(row)
+
+
+def set_draft_failed(job_posting_id: UUID | str, error: str) -> None:
+    """Record draft generation failure: reset status='promoted', store error."""
+    pid = str(job_posting_id)
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update applications
+               set status      = 'promoted',
+                   draft_error = %s,
+                   updated_at  = now()
+             where job_posting_id = %s
+            """,
+            (error, pid),
+        )
+        conn.commit()
+
+
+def get_draft_status(job_posting_id: UUID | str) -> dict | None:
+    """Return current async draft generation state for the poll endpoint.
+
+    Returns None if no applications row exists.
+    Returns one of:
+      {"status": "pending"}
+      {"status": "complete", ...draft fields}
+      {"status": "failed", "error": "..."}
+      {"status": "idle"}
+    """
+    pid = str(job_posting_id)
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select status, resume_draft_branch, resume_draft_mr_url,
+                   resume_draft_path, cover_letter_draft_path,
+                   draft_generated_at, draft_error
+              from applications
+             where job_posting_id = %s
+            """,
+            (pid,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    status, branch, mr_url, resume_path, cl_path, generated_at, draft_error = row
+    if status == "drafting" and mr_url is not None:
+        return {
+            "status": "complete",
+            "resume_draft_branch": branch,
+            "resume_draft_mr_url": mr_url,
+            "resume_draft_path": resume_path,
+            "cover_letter_draft_path": cl_path,
+            "draft_generated_at": generated_at.isoformat() if generated_at else None,
+        }
+    if status == "drafting":
+        return {"status": "pending"}
+    if draft_error is not None:
+        return {"status": "failed", "error": draft_error}
+    return {"status": "idle"}
 
 
 def get_draft_info(job_posting_id: UUID | str) -> dict | None:

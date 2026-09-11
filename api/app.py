@@ -19,7 +19,8 @@ identity before any request reaches this Component.
 from contextlib import asynccontextmanager
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from api.job_map_projection import get_job_projection
@@ -235,18 +236,28 @@ def post_application_status(job_posting_id: UUID, body: ApplicationStatusRequest
 
 
 @app.post("/applications/{job_posting_id}/generate-drafts")
-def post_generate_drafts(job_posting_id: UUID) -> dict:
-    # Idempotent: return existing draft info if already generated.
+def post_generate_drafts(
+    job_posting_id: UUID, background_tasks: BackgroundTasks
+) -> JSONResponse:
+    # Idempotent: return complete state if draft already exists.
     existing = apps_module.get_draft_info(job_posting_id)
     if existing:
-        return {
-            "status": existing["status"],
+        return JSONResponse(status_code=200, content={
+            "status": "complete",
             "resume_draft_branch": existing["resume_draft_branch"],
             "resume_draft_mr_url": existing["resume_draft_mr_url"],
             "resume_draft_path": existing["resume_draft_path"],
             "cover_letter_draft_path": existing["cover_letter_draft_path"],
             "draft_generated_at": existing["draft_generated_at"],
-        }
+        })
+
+    app_row = apps_module.get(job_posting_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="no application found for this posting")
+
+    # Already pending — background task still running.
+    if app_row["status"] == "drafting":
+        return JSONResponse(status_code=202, content={"status": "pending"})
 
     detail = get_job_detail(job_posting_id)
     if detail is None:
@@ -257,21 +268,30 @@ def post_generate_drafts(job_posting_id: UUID) -> dict:
             detail="cannot draft: no job description captured for this posting",
         )
 
-    app_row = apps_module.get(job_posting_id)
-    if app_row is None:
-        raise HTTPException(status_code=404, detail="no application found for this posting")
+    apps_module.set_draft_pending(job_posting_id)
+    background_tasks.add_task(_run_generate_drafts, job_posting_id, detail)
+    return JSONResponse(status_code=202, content={"status": "pending"})
 
+
+def _run_generate_drafts(job_posting_id: UUID, detail: dict) -> None:
     try:
         draft = generate_drafts(job_posting_id, detail)
+        apps_module.persist_draft_info(
+            job_posting_id,
+            branch=draft["resume_draft_branch"],
+            mr_url=draft["resume_draft_mr_url"],
+            resume_path=draft["resume_draft_path"],
+            cover_letter_path=draft["cover_letter_draft_path"],
+            generated_at=draft["draft_generated_at"],
+            model_id=draft.get("draft_model_id"),
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"draft generation failed: {e}")
+        apps_module.set_draft_failed(job_posting_id, str(e))
 
-    apps_module.persist_draft_info(
-        job_posting_id,
-        branch=draft["resume_draft_branch"],
-        mr_url=draft["resume_draft_mr_url"],
-        resume_path=draft["resume_draft_path"],
-        cover_letter_path=draft["cover_letter_draft_path"],
-        generated_at=draft["draft_generated_at"],
-    )
-    return draft
+
+@app.get("/applications/{job_posting_id}/draft-status")
+def get_draft_status(job_posting_id: UUID) -> dict:
+    result = apps_module.get_draft_status(job_posting_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="no application found for this posting")
+    return result

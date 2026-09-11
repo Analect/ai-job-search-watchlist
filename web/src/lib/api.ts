@@ -230,14 +230,19 @@ export function advanceApplicationStatus(
 }
 
 export interface DraftResult {
-  status: string;
-  resume_draft_branch: string;
-  resume_draft_mr_url: string;
-  resume_draft_path: string;
-  cover_letter_draft_path: string;
-  draft_generated_at: string;
+  status: "pending" | "complete" | "failed" | "idle";
+  resume_draft_branch?: string;
+  resume_draft_mr_url?: string;
+  resume_draft_path?: string;
+  cover_letter_draft_path?: string;
+  draft_generated_at?: string;
+  error?: string;
 }
 
 export function generateDrafts(job_posting_id: string): Promise<DraftResult> {
   return request(`/applications/${job_posting_id}/generate-drafts`, { method: "POST" });
+}
+
+export function getDraftStatus(job_posting_id: string): Promise<DraftResult> {
+  return request(`/applications/${job_posting_id}/draft-status`);
 }

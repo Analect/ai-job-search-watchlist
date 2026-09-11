@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ApiError,
   advanceApplicationStatus,
   fetchApplications,
   generateDrafts,
+  getDraftStatus,
   postPostingEvent,
   type Application,
   type DraftResult,
@@ -39,12 +40,16 @@ export default function ApplicationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [draftingId, setDraftingId] = useState<string | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     fetchApplications()
       .then((res) => setApplications(res.results))
       .catch((err) => setError(err instanceof ApiError ? err.message : (err as Error).message))
       .finally(() => setLoading(false));
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
   }, []);
 
   const advanceStatus = (app: Application, status: "drafting" | "submitted") => {
@@ -73,28 +78,65 @@ export default function ApplicationsPage() {
       );
   };
 
+  const applyCompletedDraft = (appId: string, draft: DraftResult) => {
+    setApplications((prev) =>
+      prev.map((a) =>
+        a.id === appId
+          ? {
+              ...a,
+              status: "drafting",
+              resume_draft_mr_url: draft.resume_draft_mr_url ?? null,
+              draft_generated_at: draft.draft_generated_at ?? null,
+            }
+          : a,
+      ),
+    );
+    setDraftingId(null);
+  };
+
+  const startPolling = (appId: string, jobPostingId: string) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    pollIntervalRef.current = setInterval(() => {
+      getDraftStatus(jobPostingId)
+        .then((result: DraftResult) => {
+          if (result.status === "complete") {
+            clearInterval(pollIntervalRef.current!);
+            pollIntervalRef.current = null;
+            applyCompletedDraft(appId, result);
+          } else if (result.status === "failed") {
+            clearInterval(pollIntervalRef.current!);
+            pollIntervalRef.current = null;
+            setActionError(result.error ?? "Draft generation failed");
+            setDraftingId(null);
+          }
+        })
+        .catch((err) => {
+          clearInterval(pollIntervalRef.current!);
+          pollIntervalRef.current = null;
+          setActionError(err instanceof ApiError ? err.message : (err as Error).message);
+          setDraftingId(null);
+        });
+    }, 3000);
+  };
+
   const generateDraft = (app: Application) => {
     setDraftingId(app.job_posting_id);
     setActionError(null);
     generateDrafts(app.job_posting_id)
-      .then((draft: DraftResult) => {
-        setApplications((prev) =>
-          prev.map((a) =>
-            a.id === app.id
-              ? {
-                  ...a,
-                  status: "drafting",
-                  resume_draft_mr_url: draft.resume_draft_mr_url,
-                  draft_generated_at: draft.draft_generated_at,
-                }
-              : a,
-          ),
-        );
+      .then((result: DraftResult) => {
+        if (result.status === "complete") {
+          applyCompletedDraft(app.id, result);
+        } else if (result.status === "pending") {
+          startPolling(app.id, app.job_posting_id);
+        } else if (result.status === "failed") {
+          setActionError(result.error ?? "Draft generation failed");
+          setDraftingId(null);
+        }
       })
-      .catch((err) =>
-        setActionError(err instanceof ApiError ? err.message : (err as Error).message),
-      )
-      .finally(() => setDraftingId(null));
+      .catch((err) => {
+        setActionError(err instanceof ApiError ? err.message : (err as Error).message);
+        setDraftingId(null);
+      });
   };
 
   if (loading) return <p className="py-6 text-center text-sm text-muted">Loading…</p>;
