@@ -35,6 +35,12 @@ _tfidf_matrix = None
 _tfidf_rows = None
 
 
+_ATS_ADAPTER_TYPES = frozenset({
+    "ashby", "eightfold", "greenhouse", "lever",
+    "oracle_hcm", "pinpoint", "workable", "workday",
+})
+
+
 def _compute_projection() -> list[dict]:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -48,7 +54,9 @@ def _compute_projection() -> list[dict]:
                     select string_agg(distinct b.monitor_type, ', ')
                     from jseek_boards b
                     where b.company_slug = c.slug
-                ) as ats_types
+                ) as ats_types,
+                c.same_as,
+                c.wikidata_id
             from jseek_companies c
             join jseek_company_descriptions d on d.company_slug = c.slug and d.locale = 'en'
             join jseek_industries i on i.id = c.industry_id
@@ -76,9 +84,12 @@ def _compute_projection() -> list[dict]:
             "slug": row[0],
             "name": row[1],
             "industry": row[2],
+            "description": row[3],
             "x": float(coords[i, 0]),
             "y": float(coords[i, 1]),
             "ats_types": row[4],
+            "same_as": row[5],
+            "wikidata_id": row[6],
         }
         for i, row in enumerate(rows)
     ]
@@ -90,13 +101,58 @@ def _fetch_short_listed_slugs() -> set[str]:
         return {row[0] for row in cur.fetchall()}
 
 
+def _fetch_boards_and_monitoring() -> dict[str, dict]:
+    """Return a slug -> {"boards": [...], "ats_active": bool} map.
+
+    Queried fresh on every call — NOT baked into _cache — for the same
+    reason short_listed is kept out of the cache: monitoring status can
+    change between deploys (e.g. a board is added/removed via the jseek
+    refresh pipeline), and a stale cached value would misrepresent the
+    current monitoring state to the user on every page load until the
+    next process restart. See _cache docstring for the original short_listed
+    rationale; this is the same invariant applied to boards/ats_active.
+    """
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select b.company_slug,
+                   json_agg(json_build_object('type', b.monitor_type, 'url', b.board_url)) as boards
+              from jseek_boards b
+             group by b.company_slug
+            """
+        )
+        rows = cur.fetchall()
+
+    result: dict[str, dict] = {}
+    for company_slug, boards in rows:
+        if isinstance(boards, list):
+            board_list = boards
+        else:
+            import json as _json
+            board_list = _json.loads(boards) if boards else []
+        ats_active = any(
+            b.get("type") in _ATS_ADAPTER_TYPES for b in board_list
+        )
+        result[company_slug] = {"boards": board_list, "ats_active": ats_active}
+    return result
+
+
 def get_projection(refresh: bool = False) -> list[dict]:
     global _cache
     if _cache is None or refresh:
         _cache = _compute_projection()
 
     short_listed = _fetch_short_listed_slugs()
-    return [{**company, "short_listed": company["slug"] in short_listed} for company in _cache]
+    boards_map = _fetch_boards_and_monitoring()
+    return [
+        {
+            **company,
+            "short_listed": company["slug"] in short_listed,
+            "boards": boards_map.get(company["slug"], {}).get("boards", []),
+            "ats_active": boards_map.get(company["slug"], {}).get("ats_active", False),
+        }
+        for company in _cache
+    ]
 
 
 def _node_to_dict(node, slugs: list[str]) -> dict:
