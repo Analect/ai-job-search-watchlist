@@ -5,6 +5,7 @@ reinvented. Reusable across any adapter returning free-text titles/
 locations or HTML job descriptions, not just Greenhouse.
 """
 
+import html
 import re
 
 # Href-less anchors whose text is a collapsed-section toggle. Some ATS
@@ -16,6 +17,11 @@ _STRAY_TOGGLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Detects doubly-encoded HTML tag markers: e.g. `&lt;h1&gt;` (the entity-
+# escaped form of `<h1>`). Present only in doubly-encoded content — real HTML
+# uses literal `<`/`>`, not the entity-escaped form of those characters.
+_DOUBLE_ENCODED_TAG_RE = re.compile(r"&lt;/?\w[^&]*&gt;")
+
 
 def clean_text(value: str | None) -> str | None:
     """Collapse source formatting whitespace in a display field (title,
@@ -26,16 +32,31 @@ def clean_text(value: str | None) -> str | None:
     return cleaned or None
 
 
-def clean_description(html: str | None) -> str | None:
-    """Strip stray WYSIWYG toggle-anchor artifacts from an HTML job
-    description. Returns the input unchanged if it's empty — this
-    deliberately keeps the HTML intact (job-search-web renders it as
-    rich text), it does not produce plain text. Use html_to_text() for
-    that (TF-IDF/embeddings input, where tags/inline-styles are noise,
-    not signal)."""
-    if not html:
-        return html
-    return _STRAY_TOGGLE_RE.sub("", html)
+def _unescape_if_double_encoded(text: str) -> str:
+    """Conditionally apply html.unescape() — only when doubly-encoded tag
+    markers are detected (e.g. `&lt;h1&gt;`). Already-correct HTML (real
+    `<`/`>` characters) passes through byte-for-byte unchanged, so this
+    is safe to call on any description regardless of provider.
+
+    Idempotent by construction: once unescaped, the detection regex no
+    longer matches, making a second pass a no-op (satisfying US8's
+    "no posting corrected more than once" requirement without a flag column).
+    """
+    if _DOUBLE_ENCODED_TAG_RE.search(text):
+        return html.unescape(text)
+    return text
+
+
+def clean_description(raw_html: str | None) -> str | None:
+    """Clean an HTML job description: unescape doubly-encoded content
+    (US8 Greenhouse fix) and strip stray WYSIWYG toggle-anchor artifacts.
+    Returns the input unchanged if it's empty — this deliberately keeps
+    the HTML intact (job-search-web renders it as rich text). Use
+    html_to_text() for plain-text analysis input."""
+    if not raw_html:
+        return raw_html
+    cleaned = _unescape_if_double_encoded(raw_html)
+    return _STRAY_TOGGLE_RE.sub("", cleaned)
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
