@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from api.job_map_projection import get_job_projection
 from api.map_projection import get_dendrogram, get_projection
 from pipelines.common import applications as apps_module
-from pipelines.common.applications import AlreadyActiveError
+from pipelines.common.applications import AlreadyActiveError, update_notes
 from pipelines.common.db import get_connection
 from pipelines.common.employer_similarity import find_similar_employers
 from pipelines.common.events import VALID_EVENT_TYPES, mark_for_advancement
@@ -34,6 +34,7 @@ from pipelines.common.postings import (
     bulk_mark_reviewed,
     get_job_detail,
     list_postings,
+    list_unreviewed_for_employer,
 )
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
@@ -66,6 +67,10 @@ class ApplicationStatusRequest(BaseModel):
     status: str
 
 
+class ApplicationNotesRequest(BaseModel):
+    notes: str
+
+
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok"}
@@ -95,6 +100,7 @@ def get_postings(
         pattern="^(unreviewed|reviewed|flagged|promoted|thumbs_up|thumbs_down)$",
     ),
     query: str | None = None,
+    company: str | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
@@ -103,6 +109,7 @@ def get_postings(
         status=status,
         review_state=review_state,
         query=query,
+        company=company,
         limit=limit,
         offset=offset,
     )
@@ -204,6 +211,11 @@ def get_similar_employers(slug: str, limit: int = Query(default=5, ge=1, le=20))
     return find_similar_employers(slug, limit=limit)
 
 
+@app.get("/employers/{slug}/postings")
+def get_employer_postings(slug: str) -> dict:
+    return {"results": list_unreviewed_for_employer(slug)}
+
+
 # --- Job map / promoted list ---
 
 @app.get("/jobs/map/coordinates")
@@ -222,6 +234,14 @@ def get_promoted_jobs() -> dict:
 def get_applications() -> dict:
     results = apps_module.list_all()
     return {"results": results}
+
+
+@app.patch("/applications/{job_posting_id}/notes")
+def patch_application_notes(job_posting_id: UUID, body: ApplicationNotesRequest) -> dict:
+    result = update_notes(job_posting_id, body.notes)
+    if result is None:
+        raise HTTPException(status_code=404, detail="no application found for this posting")
+    return result
 
 
 @app.post("/applications/{job_posting_id}/status")
