@@ -111,6 +111,7 @@ def list_postings(
             f"""
             select count(*)
             from job_postings jp
+            join employers e on e.id = jp.employer_id
             where 1=1
             """
             + _FILTERS_SQL,
