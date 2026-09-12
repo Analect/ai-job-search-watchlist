@@ -1,12 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
+import CompanyDetailPane from "@/components/EmployerWatch/CompanyDetailPane";
 import SplitPane from "@/components/SplitPane";
-import {
-  ApiError,
-  addToWatchlist,
-  removeFromWatchlist,
-  type MapCompany,
-} from "@/lib/api";
+import { useRectZoom } from "@/hooks/useRectZoom";
+import { type MapCompany } from "@/lib/api";
 
 const WIDTH = 900;
 const HEIGHT = 500;
@@ -20,12 +17,22 @@ interface EmployerMapProps {
 export default function EmployerMap({ companies, onCompaniesChange }: EmployerMapProps) {
   const [hovered, setHovered] = useState<MapCompany | null>(null);
   const [selected, setSelected] = useState<MapCompany | null>(null);
-  const [actionMsg, setActionMsg] = useState<string | null>(null);
-  const [acting, setActing] = useState(false);
+  const [mapSearch, setMapSearch] = useState("");
 
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const dragState = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const { zoom, transform, selectionRect, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom } =
+    useRectZoom({ viewWidth: WIDTH, viewHeight: HEIGHT });
+
+  const watchlistedCount = useMemo(() => companies.filter((c) => c.short_listed).length, [companies]);
+
+  const searchMatches = useMemo(() => {
+    const q = mapSearch.trim().toLowerCase();
+    if (!q) return null;
+    return new Set(
+      companies
+        .filter((c) => c.name.toLowerCase().includes(q))
+        .map((c) => c.slug),
+    );
+  }, [companies, mapSearch]);
 
   const scale = useMemo(() => {
     if (companies.length === 0) return null;
@@ -43,79 +50,26 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
     });
   }, [companies]);
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    setZoom((z) => Math.min(20, Math.max(1, z * (e.deltaY < 0 ? 1.1 : 0.9))));
-  };
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    dragState.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
-    (e.target as Element).setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!dragState.current) return;
-    setPan({
-      x: dragState.current.panX + (e.clientX - dragState.current.startX),
-      y: dragState.current.panY + (e.clientY - dragState.current.startY),
-    });
-  };
-
-  const handlePointerUp = () => {
-    dragState.current = null;
-  };
-
-  const toggleWatchlist = async (company: MapCompany) => {
-    setActing(true);
-    setActionMsg(null);
-    try {
-      if (company.short_listed) {
-        await removeFromWatchlist(company.slug);
-        onCompaniesChange(companies.map((c) => (c.slug === company.slug ? { ...c, short_listed: false } : c)));
-        setSelected((s) => s?.slug === company.slug ? { ...s, short_listed: false } : s);
-        setActionMsg(`${company.name} removed from watchlist.`);
-      } else {
-        const res = await addToWatchlist(company.slug);
-        onCompaniesChange(companies.map((c) => (c.slug === company.slug ? { ...c, short_listed: true } : c)));
-        setSelected((s) => s?.slug === company.slug ? { ...s, short_listed: true } : s);
-        if (!res.collection_supported) {
-          setActionMsg(`${company.name} added — no automated pipeline for this ATS yet.`);
-        }
-      }
-    } catch (err) {
-      setActionMsg(
-        `Action failed: ${err instanceof ApiError ? err.message : (err as Error).message}`,
-      );
-    } finally {
-      setActing(false);
+  const handleSearchChange = (q: string) => {
+    setMapSearch(q);
+    if (!q.trim()) return;
+    const firstMatch = companies.find((c) =>
+      c.name.toLowerCase().includes(q.trim().toLowerCase()),
+    );
+    if (firstMatch) {
+      setSelected(firstMatch);
     }
   };
 
   const detailPane = selected ? (
-    <div className="space-y-3 p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="font-semibold text-ink">{selected.name}</p>
-          <p className="text-sm text-muted">{selected.industry ?? "—"}</p>
-          {selected.ats_types ? (
-            <p className="text-xs text-muted">ATS: {selected.ats_types}</p>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          disabled={acting}
-          onClick={() => toggleWatchlist(selected)}
-          className={`rounded-card border px-3 py-1 text-sm font-medium disabled:opacity-40 ${
-            selected.short_listed
-              ? "border-danger text-danger"
-              : "border-ok text-ok"
-          }`}
-        >
-          {selected.short_listed ? "Remove from watchlist" : "Add to watchlist"}
-        </button>
-      </div>
-      {actionMsg ? <p className="text-sm text-ink">{actionMsg}</p> : null}
-    </div>
+    <CompanyDetailPane
+      company={selected}
+      onCompaniesChange={(updater) => {
+        const updated = updater(selected);
+        setSelected(updated);
+        onCompaniesChange(companies.map((c) => (c.slug === updated.slug ? updated : c)));
+      }}
+    />
   ) : (
     <p className="p-4 text-sm text-muted">Click a company dot to see its details.</p>
   );
@@ -124,43 +78,78 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
     <SplitPane
       top={
         <div className="space-y-2 p-2">
-          <p className="text-xs text-muted">
-            {companies.length} companies · gold = on watchlist · scroll to zoom, drag to pan
-          </p>
+          {/* Header: counts + search */}
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-xs text-muted">
+              {companies.length} companies · {watchlistedCount} on watchlist · scroll/shift+drag to zoom, drag to pan
+            </p>
+            <button
+              type="button"
+              onClick={resetZoom}
+              className="rounded-card border border-border-subtle px-2 py-0.5 text-xs text-muted"
+            >
+              Reset
+            </button>
+            <input
+              value={mapSearch}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Search company name…"
+              className="rounded-card border border-border-subtle bg-surface px-2 py-1 text-xs text-ink placeholder:text-muted"
+              style={{ minWidth: 180 }}
+            />
+            {mapSearch && searchMatches && searchMatches.size === 0 ? (
+              <span className="text-xs text-danger">No matches</span>
+            ) : null}
+          </div>
           <div className="relative overflow-hidden rounded-card border border-border-subtle bg-surface">
             <svg
               viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
               className="h-[500px] w-full cursor-grab active:cursor-grabbing"
-              onWheel={handleWheel}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerLeave={handlePointerUp}
+              onWheel={onWheel}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerLeave={onPointerUp}
             >
-              <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
+              <g transform={transform}>
                 {scale
                   ? companies.map((c) => {
                       const { cx, cy } = scale(c.x, c.y);
                       const isSelected = selected?.slug === c.slug;
+                      const isMatch = searchMatches ? searchMatches.has(c.slug) : false;
                       return (
                         <circle
                           key={c.slug}
                           cx={cx}
                           cy={cy}
                           r={isSelected ? 6 / Math.sqrt(zoom) : c.short_listed ? 5 / Math.sqrt(zoom) : 3 / Math.sqrt(zoom)}
-                          fill={c.short_listed ? "var(--accent)" : "var(--muted)"}
-                          stroke={isSelected ? "white" : c.short_listed ? "gold" : "none"}
-                          strokeWidth={isSelected ? 2 / Math.sqrt(zoom) : c.short_listed ? 1.5 / Math.sqrt(zoom) : 0}
+                          fill={c.short_listed ? "var(--accent)" : isMatch ? "var(--ok)" : "var(--muted)"}
+                          stroke={isSelected ? "white" : isMatch ? "var(--ok)" : c.short_listed ? "gold" : "none"}
+                          strokeWidth={isSelected ? 2 / Math.sqrt(zoom) : isMatch ? 1.5 / Math.sqrt(zoom) : c.short_listed ? 1.5 / Math.sqrt(zoom) : 0}
                           opacity={hovered && hovered.slug !== c.slug && !isSelected ? 0.35 : 0.85}
                           onMouseEnter={() => setHovered(c)}
                           onMouseLeave={() => setHovered((h) => (h?.slug === c.slug ? null : h))}
-                          onClick={() => { setSelected(c); setActionMsg(null); }}
+                          onClick={() => { setSelected(c); }}
                           style={{ cursor: "pointer" }}
                         />
                       );
                     })
                   : null}
               </g>
+              {selectionRect ? (
+                <rect
+                  x={Math.min(selectionRect.x1, selectionRect.x2)}
+                  y={Math.min(selectionRect.y1, selectionRect.y2)}
+                  width={Math.abs(selectionRect.x2 - selectionRect.x1)}
+                  height={Math.abs(selectionRect.y2 - selectionRect.y1)}
+                  fill="var(--accent)"
+                  fillOpacity={0.1}
+                  stroke="var(--accent)"
+                  strokeWidth={1}
+                  strokeDasharray="4 2"
+                  pointerEvents="none"
+                />
+              ) : null}
             </svg>
             {hovered ? (
               <div className="pointer-events-none absolute left-3 top-3 rounded-card border border-border-subtle bg-surface px-3 py-2 text-xs shadow">
