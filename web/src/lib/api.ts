@@ -65,6 +65,7 @@ export interface PostingsFilter {
   status?: string;
   review_state?: ReviewState | "";
   query?: string;
+  company?: string;
   limit?: number;
   offset?: number;
 }
@@ -146,6 +147,11 @@ export interface MapCompany {
   y: number;
   short_listed: boolean;
   ats_types: string | null;
+  description: string | null;
+  same_as: string[] | null;
+  wikidata_id: string | null;
+  boards: { type: string; url: string }[] | null;
+  ats_active: boolean;
 }
 
 export function fetchMapCoordinates(): Promise<{ companies: MapCompany[] }> {
@@ -213,6 +219,9 @@ export interface Application {
   status: "promoted" | "drafting" | "submitted" | "withdrawn";
   resume_draft_mr_url: string | null;
   draft_generated_at: string | null;
+  application_notes: string | null;
+  draft_model_id: string | null;
+  draft_error: string | null;
 }
 
 export function fetchApplications(): Promise<{ results: Application[] }> {
@@ -236,6 +245,7 @@ export interface DraftResult {
   resume_draft_path?: string;
   cover_letter_draft_path?: string;
   draft_generated_at?: string;
+  draft_model_id?: string | null;
   error?: string;
 }
 
@@ -245,4 +255,20 @@ export function generateDrafts(job_posting_id: string): Promise<DraftResult> {
 
 export function getDraftStatus(job_posting_id: string): Promise<DraftResult> {
   return request(`/applications/${job_posting_id}/draft-status`);
+}
+
+export function saveApplicationNotes(
+  job_posting_id: string,
+  notes: string,
+): Promise<Application> {
+  return request(`/applications/${job_posting_id}/notes`, {
+    method: "PATCH",
+    body: JSON.stringify({ notes }),
+  });
+}
+
+export function fetchEmployerPostings(
+  slug: string,
+): Promise<{ results: { id: string; title: string; posted_date: string | null }[] }> {
+  return request(`/employers/${slug}/postings`);
 }

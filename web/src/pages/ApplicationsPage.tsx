@@ -7,6 +7,7 @@ import {
   generateDrafts,
   getDraftStatus,
   postPostingEvent,
+  saveApplicationNotes,
   type Application,
   type DraftResult,
 } from "@/lib/api";
@@ -87,6 +88,8 @@ export default function ApplicationsPage() {
               status: "drafting",
               resume_draft_mr_url: draft.resume_draft_mr_url ?? null,
               draft_generated_at: draft.draft_generated_at ?? null,
+              draft_model_id: draft.draft_model_id ?? null,
+              draft_error: null,
             }
           : a,
       ),
@@ -107,6 +110,13 @@ export default function ApplicationsPage() {
             clearInterval(pollIntervalRef.current!);
             pollIntervalRef.current = null;
             setActionError(result.error ?? "Draft generation failed");
+            setApplications((prev) =>
+              prev.map((a) =>
+                a.job_posting_id === jobPostingId
+                  ? { ...a, draft_error: result.error ?? "Draft generation failed" }
+                  : a,
+              ),
+            );
             setDraftingId(null);
           }
         })
@@ -160,6 +170,7 @@ export default function ApplicationsPage() {
             <tr className="border-b border-border-subtle text-xs font-medium uppercase tracking-wide text-muted">
               <th className="pb-2 px-3 font-medium">Job</th>
               <th className="pb-2 px-3 font-medium">Status</th>
+              <th className="pb-2 px-3 font-medium">Notes</th>
               <th className="pb-2 px-3 font-medium">Drafted</th>
               <th className="pb-2 px-3 font-medium">Actions</th>
             </tr>
@@ -174,16 +185,43 @@ export default function ApplicationsPage() {
                 <td className={`py-3 px-3 ${STATUS_CLASS[app.status]}`}>
                   {STATUS_LABEL[app.status]}
                 </td>
+                <td className="py-3 px-3">
+                  <textarea
+                    defaultValue={app.application_notes ?? ""}
+                    placeholder="Add guidance notes…"
+                    rows={2}
+                    className="w-full rounded-card border border-border-subtle bg-surface px-2 py-1 text-xs text-ink placeholder:text-muted"
+                    onBlur={(e) => {
+                      const val = e.target.value;
+                      if (val !== (app.application_notes ?? "")) {
+                        saveApplicationNotes(app.job_posting_id, val).catch(() => null);
+                        setApplications((prev) =>
+                          prev.map((a) =>
+                            a.id === app.id ? { ...a, application_notes: val } : a,
+                          ),
+                        );
+                      }
+                    }}
+                    style={{ minWidth: 140 }}
+                  />
+                </td>
                 <td className="py-3 px-3 text-muted">
                   {app.resume_draft_mr_url ? (
-                    <a
-                      href={app.resume_draft_mr_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-accent underline"
-                    >
-                      View MR
-                    </a>
+                    <div>
+                      <a
+                        href={app.resume_draft_mr_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-accent underline"
+                      >
+                        View MR
+                      </a>
+                      {app.draft_model_id ? (
+                        <p className="mt-0.5 text-xs text-muted">Model: {app.draft_model_id}</p>
+                      ) : null}
+                    </div>
+                  ) : app.draft_error ? (
+                    <p className="text-xs text-danger">{app.draft_error}</p>
                   ) : (
                     formatDate(app.draft_generated_at)
                   )}
