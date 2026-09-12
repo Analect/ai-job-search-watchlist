@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 
 import PostingDetailPane from "@/components/PostingDetailPane";
 import SplitPane from "@/components/SplitPane";
+import { useRectZoom } from "@/hooks/useRectZoom";
 import {
   fetchPostingDetail,
   postPostingEvent,
@@ -18,15 +19,22 @@ interface JobWatchMapProps {
   onJobsChange: (next: MapJob[]) => void;
 }
 
+function jobColor(j: MapJob): string {
+  if (j.promoted) return "var(--accent)";
+  if (j.flagged)  return "var(--ok)";
+  // thumbs_up/thumbs_down come through as review_state on the MapJob type;
+  // fall through to muted for all other states.
+  return "var(--muted)";
+}
+
 export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
   const [hovered, setHovered] = useState<MapJob | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PostingDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const dragState = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null);
+  const { zoom, transform, selectionRect, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom } =
+    useRectZoom({ viewWidth: WIDTH, viewHeight: HEIGHT });
 
   const scale = useMemo(() => {
     if (jobs.length === 0) return null;
@@ -43,28 +51,6 @@ export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
       cy: HEIGHT - PADDING - (y - yMin) * sy,
     });
   }, [jobs]);
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    setZoom((z) => Math.min(20, Math.max(1, z * (e.deltaY < 0 ? 1.1 : 0.9))));
-  };
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    dragState.current = { startX: e.clientX, startY: e.clientY, panX: pan.x, panY: pan.y };
-    (e.target as Element).setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!dragState.current) return;
-    setPan({
-      x: dragState.current.panX + (e.clientX - dragState.current.startX),
-      y: dragState.current.panY + (e.clientY - dragState.current.startY),
-    });
-  };
-
-  const handlePointerUp = () => {
-    dragState.current = null;
-  };
 
   const selectJob = (job: MapJob) => {
     setSelectedId(job.id);
@@ -94,36 +80,40 @@ export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
     <SplitPane
       top={
         <div className="space-y-2 p-2">
-          <p className="text-xs text-muted">
-            {jobs.length} postings · purple = promoted · scroll to zoom, drag to pan
-          </p>
+          <div className="flex items-center gap-3">
+            <p className="text-xs text-muted">
+              {jobs.length} postings · purple=promoted · green=flagged · scroll/shift+drag to zoom, drag to pan
+            </p>
+            <button
+              type="button"
+              onClick={resetZoom}
+              className="rounded-card border border-border-subtle px-2 py-0.5 text-xs text-muted"
+            >
+              Reset
+            </button>
+          </div>
           <div className="relative overflow-hidden rounded-card border border-border-subtle bg-surface">
             <svg
               viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
               className="h-[500px] w-full cursor-grab active:cursor-grabbing"
-              onWheel={handleWheel}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerLeave={handlePointerUp}
+              onWheel={onWheel}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerLeave={onPointerUp}
             >
-              <g transform={`translate(${pan.x} ${pan.y}) scale(${zoom})`}>
+              <g transform={transform}>
                 {scale
                   ? jobs.map((j) => {
                       const { cx, cy } = scale(j.x, j.y);
                       const isSelected = j.id === selectedId;
-                      const color = j.promoted
-                        ? "var(--accent)"
-                        : j.flagged
-                        ? "var(--ok)"
-                        : "var(--muted)";
                       return (
                         <circle
                           key={j.id}
                           cx={cx}
                           cy={cy}
                           r={isSelected ? 6 / Math.sqrt(zoom) : 3 / Math.sqrt(zoom)}
-                          fill={color}
+                          fill={jobColor(j)}
                           stroke={isSelected ? "white" : "none"}
                           strokeWidth={isSelected ? 2 / Math.sqrt(zoom) : 0}
                           opacity={hovered && hovered.id !== j.id && !isSelected ? 0.35 : 0.85}
@@ -136,6 +126,21 @@ export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
                     })
                   : null}
               </g>
+              {/* Rect-zoom selection overlay — rendered outside the zoomable <g> */}
+              {selectionRect ? (
+                <rect
+                  x={Math.min(selectionRect.x1, selectionRect.x2)}
+                  y={Math.min(selectionRect.y1, selectionRect.y2)}
+                  width={Math.abs(selectionRect.x2 - selectionRect.x1)}
+                  height={Math.abs(selectionRect.y2 - selectionRect.y1)}
+                  fill="var(--accent)"
+                  fillOpacity={0.1}
+                  stroke="var(--accent)"
+                  strokeWidth={1}
+                  strokeDasharray="4 2"
+                  pointerEvents="none"
+                />
+              ) : null}
             </svg>
             {hovered ? (
               <div className="pointer-events-none absolute left-3 top-3 max-w-xs rounded-card border border-border-subtle bg-surface px-3 py-2 text-xs shadow">
