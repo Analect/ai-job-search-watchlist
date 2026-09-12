@@ -61,6 +61,7 @@ _FILTERS_SQL = """
                and d.content ilike '%%' || %(query)s || '%%'
         )
     )
+    and (%(company)s is null or e.slug = %(company)s)
 """
 
 
@@ -69,6 +70,7 @@ def list_postings(
     status: str | None = None,
     review_state: str | None = None,
     query: str | None = None,
+    company: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
@@ -77,6 +79,7 @@ def list_postings(
         "status": status,
         "review_state": review_state,
         "query": query,
+        "company": company,
         "limit": limit,
         "offset": offset,
     }
@@ -245,6 +248,29 @@ def search_jobs(
     if not results:
         return {"results": [], "message": "no postings matched"}
     return {"results": results}
+
+
+def list_unreviewed_for_employer(slug: str) -> list[dict]:
+    """Return unreviewed postings (reviewed=false, flagged=false, promoted=false,
+    thumbs is null) scoped to one employer by slug."""
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select jp.id, jp.title, jp.posted_date
+              from job_postings jp
+              join employers e on e.id = jp.employer_id
+             where e.slug = %(slug)s
+               and jp.reviewed = false
+               and jp.flagged  = false
+               and jp.promoted = false
+               and jp.thumbs is null
+             order by jp.posted_date desc nulls last, jp.id
+             limit 20
+            """,
+            {"slug": slug},
+        )
+        rows = cur.fetchall()
+    return [{"id": r[0], "title": r[1], "posted_date": r[2]} for r in rows]
 
 
 def get_job_detail(job_posting_id: UUID | str) -> dict | None:

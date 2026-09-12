@@ -95,14 +95,42 @@ def get(job_posting_id: UUID | str) -> dict | None:
         cur.execute(
             """
             select id, job_posting_id, status, resume_draft_mr_url,
-                   draft_generated_at, created_at, updated_at
+                   draft_generated_at, created_at, updated_at,
+                   application_notes, draft_model_id, draft_error
               from applications
              where job_posting_id = %s
             """,
             (pid,),
         )
         row = cur.fetchone()
-    return _row_to_dict(row) if row else None
+    return _row_to_dict_extended(row) if row else None
+
+
+def update_notes(job_posting_id: UUID | str, notes: str) -> dict | None:
+    """Write application_notes for the given posting.
+
+    Returns the updated row dict, or None if no applications row exists.
+    """
+    pid = str(job_posting_id)
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            update applications
+               set application_notes = %s,
+                   updated_at = now()
+             where job_posting_id = %s
+            returning id, job_posting_id, status, resume_draft_mr_url,
+                      draft_generated_at, created_at, updated_at,
+                      application_notes, draft_model_id, draft_error
+            """,
+            (notes, pid),
+        )
+        row = cur.fetchone()
+        if row is None:
+            conn.rollback()
+            return None
+        conn.commit()
+    return _row_to_dict_extended(row)
 
 
 def list_all() -> list[dict]:
@@ -112,7 +140,8 @@ def list_all() -> list[dict]:
             select a.id, a.job_posting_id, a.status,
                    jp.title, e.name as employer_name,
                    a.resume_draft_mr_url, a.draft_generated_at,
-                   a.created_at, a.updated_at
+                   a.created_at, a.updated_at,
+                   a.application_notes, a.draft_model_id, a.draft_error
               from applications a
               join job_postings jp on jp.id = a.job_posting_id
               join employers e on e.id = jp.employer_id
@@ -129,6 +158,9 @@ def list_all() -> list[dict]:
             "employer_name": r[4],
             "resume_draft_mr_url": r[5],
             "draft_generated_at": r[6],
+            "application_notes": r[9],
+            "draft_model_id": r[10],
+            "draft_error": r[11],
         }
         for r in rows
     ]
@@ -309,6 +341,12 @@ def get_draft_status(job_posting_id: UUID | str) -> dict | None:
         return None
     status, branch, mr_url, resume_path, cl_path, generated_at, draft_error = row
     if status == "drafting" and mr_url is not None:
+        with get_connection() as conn2, conn2.cursor() as cur2:
+            cur2.execute(
+                "select draft_model_id from applications where job_posting_id = %s",
+                (pid,),
+            )
+            model_row = cur2.fetchone()
         return {
             "status": "complete",
             "resume_draft_branch": branch,
@@ -316,6 +354,7 @@ def get_draft_status(job_posting_id: UUID | str) -> dict | None:
             "resume_draft_path": resume_path,
             "cover_letter_draft_path": cl_path,
             "draft_generated_at": generated_at.isoformat() if generated_at else None,
+            "draft_model_id": model_row[0] if model_row else None,
         }
     if status == "drafting":
         return {"status": "pending"}
@@ -359,4 +398,19 @@ def _row_to_dict(row) -> dict:
         "status": row[2],
         "resume_draft_mr_url": row[3],
         "draft_generated_at": row[4],
+    }
+
+
+def _row_to_dict_extended(row) -> dict:
+    """For queries that include application_notes, draft_model_id, draft_error
+    as columns 7/8/9 (0-indexed)."""
+    return {
+        "id": row[0],
+        "job_posting_id": row[1],
+        "status": row[2],
+        "resume_draft_mr_url": row[3],
+        "draft_generated_at": row[4],
+        "application_notes": row[7] if len(row) > 7 else None,
+        "draft_model_id": row[8] if len(row) > 8 else None,
+        "draft_error": row[9] if len(row) > 9 else None,
     }
