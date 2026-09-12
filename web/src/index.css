@@ -37,3 +37,10 @@ body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
+
+.term-highlight {
+  background-color: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}

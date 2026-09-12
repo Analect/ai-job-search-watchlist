@@ -5,9 +5,11 @@ import SplitPane from "@/components/SplitPane";
 import {
   ApiError,
   bulkMarkReviewed,
+  fetchMapCoordinates,
   fetchPostingDetail,
   fetchPostings,
   postPostingEvent,
+  type MapCompany,
   type PostingDetail,
   type PostingSummary,
   type ReviewState,
@@ -110,7 +112,15 @@ export default function PostingsPage() {
   const [status, setStatus] = useState("");
   const [reviewState, setReviewState] = useState("");
   const [query, setQuery] = useState("");
+  const [company, setCompany] = useState("");
   const [offset, setOffset] = useState(0);
+
+  const [watchlistCompanies, setWatchlistCompanies] = useState<MapCompany[]>([]);
+  useEffect(() => {
+    fetchMapCoordinates()
+      .then((res) => setWatchlistCompanies(res.companies.filter((c) => c.short_listed)))
+      .catch(() => null);
+  }, []);
 
   const [results, setResults] = useState<PostingSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -118,8 +128,19 @@ export default function PostingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [splitActive, setSplitActive] = useState(false);
   const [detail, setDetail] = useState<PostingDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Pre-select posting from ?selected=<id> query param on initial mount.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("selected");
+    if (id) selectPosting(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [bulkReviewing, setBulkReviewing] = useState(false);
@@ -128,7 +149,7 @@ export default function PostingsPage() {
   // Filter changes reset pagination
   useEffect(() => {
     setOffset(0);
-  }, [location, status, reviewState, query]);
+  }, [location, status, reviewState, query, company]);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +159,7 @@ export default function PostingsPage() {
       status: status || undefined,
       review_state: (reviewState as ReviewState) || undefined,
       query: query || undefined,
+      company: company || undefined,
       limit: PAGE_SIZE,
       offset,
     })
@@ -157,10 +179,11 @@ export default function PostingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [location, status, reviewState, query, offset]);
+  }, [location, status, reviewState, query, company, offset, refreshKey]);
 
   const selectPosting = (id: string) => {
     setSelectedId(id);
+    setSplitActive(true);
     setDetailLoading(true);
     setDetail(null);
     fetchPostingDetail(id)
@@ -275,12 +298,34 @@ export default function PostingsPage() {
           <option value="thumbs_up">👍 Thumbs up</option>
           <option value="thumbs_down">👎 Thumbs down</option>
         </select>
+        {watchlistCompanies.length > 0 ? (
+          <select
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            className="rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink"
+          >
+            <option value="">Any company</option>
+            {watchlistCompanies.map((c) => (
+              <option key={c.slug} value={c.slug}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search title, description, skills…"
           className="min-w-[220px] flex-1 rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink placeholder:text-muted"
         />
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => setRefreshKey((k) => k + 1)}
+          className="rounded-card border border-border-subtle px-3 py-1.5 text-sm text-muted disabled:opacity-40"
+        >
+          Refresh
+        </button>
       </div>
 
       {/* Bulk action bar */}
@@ -375,6 +420,10 @@ export default function PostingsPage() {
       </div>
     </div>
   );
+
+  if (!splitActive) {
+    return <div className="h-full overflow-auto">{postingsList}</div>;
+  }
 
   return (
     <div style={{ height: "calc(100vh - 100px)" }}>
