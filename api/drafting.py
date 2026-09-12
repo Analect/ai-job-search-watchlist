@@ -21,6 +21,10 @@ import requests
 _GITLAB_API = "https://gitlab.analect.com/api/v4"
 _RESUME_PROJECT = "mccoole%2Fresume"  # URL-encoded project path
 _TYPST_TEMPLATES_PATH = "typst/templates"
+_PROFILE_DOCS = [
+    "system/why-what-how-system.md",
+    "system/pillars-career-arc-system.md",
+]
 
 # Cross-region inference profile ID. Must be one of the profiles covered by
 # the bedrock-agent-user BedrockInferenceProfiles IAM policy. Override at
@@ -67,26 +71,71 @@ def _slugify(text: str) -> str:
     return s.strip("-")[:40]
 
 
-def _draft_with_llm(description: str, resume_tmpl: str, letter_tmpl: str) -> tuple[str, str]:
-    """Call Bedrock Claude to fill in the resume and cover-letter templates."""
-    prompt = f"""You are helping draft job-application materials.
+def _fetch_profile_docs() -> list[tuple[str, str]]:
+    """Fetch candidate profile documents from the resume repo.
+
+    Returns a list of (path, content) tuples. On individual fetch failure,
+    logs a warning and skips that document rather than aborting the draft.
+    """
+    results = []
+    for path in _PROFILE_DOCS:
+        try:
+            content = _fetch_template(path)
+            results.append((path, content))
+        except Exception as exc:
+            print(f"[drafting] warning: could not fetch profile doc {path!r}: {exc}", flush=True)
+    return results
+
+
+def _draft_with_llm(
+    description: str,
+    resume_tmpl: str,
+    letter_tmpl: str,
+    application_notes: str | None = None,
+) -> tuple[str, str]:
+    """Call Bedrock Claude to draft the resume and cover letter.
+
+    The prompt is grounded in the candidate's real profile documents
+    (fetched from mccoole/resume) rather than asking the LLM to fill a
+    blank template — this is the root-cause fix for fabricated claims in
+    prior drafts (research.md §6, spec.md US7).
+    """
+    profile_docs = _fetch_profile_docs()
+    profile_section = "\n\n".join(
+        f"## {path}\n{content}" for path, content in profile_docs
+    )
+
+    notes_section = ""
+    if application_notes and application_notes.strip():
+        notes_section = f"\n\n## Candidate guidance\n{application_notes.strip()}"
+
+    prompt = f"""You are helping draft job-application materials for a specific candidate.
+
+CRITICAL RULE: Every claim you make about the candidate — employers, dates, metrics, \
+credentials, skills — MUST be traceable to the candidate profile documents below. \
+Do NOT invent, infer, or embellish anything not explicitly stated there.
+
+{profile_section}{notes_section}
 
 ## Job description
 {description}
 
-## Resume template (typst)
+## Resume structural template (typst — format reference only, not fill-in-the-blank)
 {resume_tmpl}
 
-## Cover letter template (typst)
+## Cover letter structural template (typst — format reference only)
 {letter_tmpl}
 
-Fill in the resume template with relevant experience tailored to this job description.
-Then fill in the cover letter template with a compelling, concise cover letter.
+Using ONLY the facts in the candidate profile above, write:
+1. A tailored resume (typst format, matching the template structure) \
+highlighting experience relevant to this job description.
+2. A cover letter (typst format) that is compelling, concise, and grounded \
+in real experience from the profile.
 
 Respond with EXACTLY the following JSON structure (no markdown fences, no preamble):
 {{
-  "resume": "<complete filled typst resume>",
-  "cover_letter": "<complete filled typst cover letter>"
+  "resume": "<complete typst resume>",
+  "cover_letter": "<complete typst cover letter>"
 }}"""
 
     client = _get_bedrock_client()
@@ -158,10 +207,15 @@ def _open_mr(branch_name: str, title: str) -> str:
 def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     """Generate resume/cover-letter drafts for a posting and push to the
     resume repo as a reviewable MR.  Returns the draft metadata dict."""
+    from pipelines.common.applications import get as _get_application
+
     posting = detail["posting"]
     description = detail["description"]  # caller already checked it's not None
     title = posting.get("title", "role")
     employer = posting.get("employer_name", "company")
+
+    app_row = _get_application(job_posting_id)
+    application_notes: str | None = app_row.get("application_notes") if app_row else None
 
     now = datetime.now(tz=timezone.utc)
     date_str = now.strftime("%Y%m%d")
@@ -172,7 +226,9 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     resume_tmpl = _fetch_template(f"{_TYPST_TEMPLATES_PATH}/resume-template.typ")
     letter_tmpl = _fetch_template(f"{_TYPST_TEMPLATES_PATH}/letter-template.typ")
 
-    resume_content, letter_content = _draft_with_llm(description, resume_tmpl, letter_tmpl)
+    resume_content, letter_content = _draft_with_llm(
+        description, resume_tmpl, letter_tmpl, application_notes=application_notes
+    )
 
     resume_filename = f"{date_str}_mccoole_resume.typ"
     letter_filename = f"{date_str}_mccoole_letter.typ"
