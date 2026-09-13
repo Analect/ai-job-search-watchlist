@@ -56,7 +56,8 @@ def _compute_projection() -> list[dict]:
                     where b.company_slug = c.slug
                 ) as ats_types,
                 c.same_as,
-                c.wikidata_id
+                c.wikidata_id,
+                c.website
             from jseek_companies c
             join jseek_company_descriptions d on d.company_slug = c.slug and d.locale = 'en'
             join jseek_industries i on i.id = c.industry_id
@@ -90,6 +91,7 @@ def _compute_projection() -> list[dict]:
             "ats_types": row[4],
             "same_as": row[5],
             "wikidata_id": row[6],
+            "website": row[7],
         }
         for i, row in enumerate(rows)
     ]

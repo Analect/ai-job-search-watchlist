@@ -26,6 +26,8 @@ export interface UseRectZoomResult {
   onPointerMove: (e: React.PointerEvent<Element>) => void;
   onPointerUp: (e: React.PointerEvent<Element>) => void;
   resetZoom: () => void;
+  /** Pan the map so that the SVG-data-space point (x, y) appears at the viewport centre. */
+  centreOn: (x: number, y: number) => void;
 }
 
 type Mode = "idle" | "panning" | "selecting";
@@ -170,6 +172,13 @@ export function useRectZoom({
     snapshot.current = { zoom: 1, pan: { x: 0, y: 0 } };
   }, []);
 
+  const centreOn = useCallback((x: number, y: number) => {
+    const z = snapshot.current.zoom;
+    const newPan = { x: viewWidth / 2 - x * z, y: viewHeight / 2 - y * z };
+    setPan(newPan);
+    snapshot.current.pan = newPan;
+  }, [viewWidth, viewHeight]);
+
   return {
     zoom,
     pan,
@@ -181,5 +190,6 @@ export function useRectZoom({
     onPointerMove,
     onPointerUp,
     resetZoom,
+    centreOn,
   };
 }

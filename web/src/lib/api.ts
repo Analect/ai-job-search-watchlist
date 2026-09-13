@@ -150,6 +150,7 @@ export interface MapCompany {
   description: string | null;
   same_as: string[] | null;
   wikidata_id: string | null;
+  website: string | null;
   boards: { type: string; url: string }[] | null;
   ats_active: boolean;
 }

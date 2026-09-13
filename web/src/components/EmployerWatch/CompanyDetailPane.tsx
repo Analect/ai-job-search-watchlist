@@ -96,6 +96,17 @@ export default function CompanyDetailPane({ company, onCompaniesChange }: Compan
         </div>
       ) : null}
 
+      {company.website ? (
+        <a
+          href={company.website}
+          target="_blank"
+          rel="noreferrer"
+          className="block text-xs text-accent underline"
+        >
+          {company.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+        </a>
+      ) : null}
+
       {company.same_as && company.same_as.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {company.same_as.map((url) => (

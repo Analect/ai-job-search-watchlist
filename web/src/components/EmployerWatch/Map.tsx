@@ -19,7 +19,7 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
   const [selected, setSelected] = useState<MapCompany | null>(null);
   const [mapSearch, setMapSearch] = useState("");
 
-  const { zoom, transform, selectionRect, isDragging, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom } =
+  const { zoom, transform, selectionRect, isDragging, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom, centreOn } =
     useRectZoom({ viewWidth: WIDTH, viewHeight: HEIGHT });
 
   const watchlistedCount = useMemo(() => companies.filter((c) => c.short_listed).length, [companies]);
@@ -50,14 +50,18 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
     });
   }, [companies]);
 
-  const handleSearchChange = (q: string) => {
-    setMapSearch(q);
-    if (!q.trim()) return;
-    const firstMatch = companies.find((c) =>
-      c.name.toLowerCase().includes(q.trim().toLowerCase()),
-    );
-    if (firstMatch) {
-      setSelected(firstMatch);
+  const candidates = useMemo(() => {
+    const q = mapSearch.trim().toLowerCase();
+    if (!q) return [];
+    return companies.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 10);
+  }, [companies, mapSearch]);
+
+  const selectCandidate = (c: MapCompany) => {
+    setSelected(c);
+    setMapSearch("");
+    if (scale) {
+      const { cx, cy } = scale(c.x, c.y);
+      centreOn(cx, cy);
     }
   };
 
@@ -90,16 +94,38 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
             >
               Reset
             </button>
-            <input
-              value={mapSearch}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              placeholder="Search company name…"
-              className="rounded-card border border-border-subtle bg-surface px-2 py-1 text-xs text-ink placeholder:text-muted"
-              style={{ minWidth: 180 }}
-            />
-            {mapSearch && searchMatches && searchMatches.size === 0 ? (
-              <span className="text-xs text-danger">No matches</span>
-            ) : null}
+            <div className="relative">
+              <input
+                value={mapSearch}
+                onChange={(e) => setMapSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") setMapSearch(""); }}
+                placeholder="Search company name…"
+                className="rounded-card border border-border-subtle bg-surface px-2 py-1 text-xs text-ink placeholder:text-muted"
+                style={{ minWidth: 180 }}
+              />
+              {mapSearch.trim() ? (
+                candidates.length > 0 ? (
+                  <ul className="absolute left-0 top-full z-10 mt-1 w-56 rounded-card border border-border-subtle bg-surface shadow-sm">
+                    {candidates.map((c) => (
+                      <li key={c.slug}>
+                        <button
+                          type="button"
+                          onClick={() => selectCandidate(c)}
+                          className="w-full px-3 py-1.5 text-left text-xs text-ink hover:bg-surface-raised"
+                        >
+                          {c.name}
+                          {c.industry ? <span className="ml-1 text-muted">· {c.industry}</span> : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="absolute left-0 top-full z-10 mt-1 w-56 rounded-card border border-border-subtle bg-surface px-3 py-2 text-xs text-danger shadow-sm">
+                    No matches
+                  </div>
+                )
+              ) : null}
+            </div>
           </div>
           <div className="relative overflow-hidden rounded-card border border-border-subtle bg-surface">
             <svg
