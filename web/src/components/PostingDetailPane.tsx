@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ApiError,
@@ -10,12 +10,16 @@ import {
 interface PostingDetailPaneProps {
   detail: PostingDetail | null;
   loading: boolean;
+  notFound?: boolean;
+  onClose?: () => void;
   onStateChange?: (id: string, patch: Record<string, unknown>) => void;
 }
 
 export default function PostingDetailPane({
   detail,
   loading,
+  notFound,
+  onClose,
   onStateChange,
 }: PostingDetailPaneProps) {
   const [savingEvent, setSavingEvent] = useState<string | null>(null);
@@ -24,8 +28,23 @@ export default function PostingDetailPane({
   const [savingComment, setSavingComment] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // T006: Reset note editor when the selected posting changes so draft text
+  // from posting A cannot bleed into posting B.
+  const postingId = detail?.posting.id as string | undefined;
+  useEffect(() => {
+    setEditingComment(false);
+    setCommentDraft("");
+  }, [postingId]);
+
+  // T007: Track the posting id that was active when a save started so we can
+  // bail if the selection changes before the response arrives.
+  const saveForId = useRef<string | undefined>(undefined);
+
   if (loading) {
     return <p className="p-4 text-sm text-muted">Loading…</p>;
+  }
+  if (notFound) {
+    return <p className="p-4 text-sm text-danger">Posting not found — it may have been removed.</p>;
   }
   if (!detail) {
     return (
@@ -65,17 +84,22 @@ export default function PostingDetailPane({
   };
 
   const saveComment = async () => {
-    if (!commentDraft.trim()) return;
+    const id = posting.id as string;
+    saveForId.current = id;
     setSavingComment(true);
     setError(null);
     try {
-      await postPostingEvent(posting.id as string, "comment_updated", commentDraft.trim());
-      onStateChange?.(posting.id as string, { comment: commentDraft.trim() });
+      await postPostingEvent(id, "comment_updated", commentDraft.trim() || undefined);
+      // T007: discard result if the user has navigated to a different posting
+      if (saveForId.current !== id) return;
+      onStateChange?.(id, { comment: commentDraft.trim() || null });
       setEditingComment(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : (err as Error).message);
+      if (saveForId.current === id) {
+        setError(err instanceof ApiError ? err.message : (err as Error).message);
+      }
     } finally {
-      setSavingComment(false);
+      if (saveForId.current === id) setSavingComment(false);
     }
   };
 
@@ -120,17 +144,30 @@ export default function PostingDetailPane({
     <div className="space-y-4 p-4">
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-      {/* Header */}
-      <div>
-        <a
-          href={posting.source_url as string}
-          target="_blank"
-          rel="noreferrer"
-          className="text-base font-semibold text-ink hover:text-accent hover:underline"
-        >
-          {posting.title as string}
-        </a>
-        <p className="text-sm text-muted">{posting.employer_name as string}</p>
+      {/* Header — T044: close button collapses back to full-width list */}
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <a
+            href={posting.source_url as string}
+            target="_blank"
+            rel="noreferrer"
+            className="text-base font-semibold text-ink hover:text-accent hover:underline"
+          >
+            {posting.title as string}
+          </a>
+          <p className="text-sm text-muted">{posting.employer_name as string}</p>
+        </div>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close detail pane"
+            aria-label="Close detail pane"
+            className="rounded-card border border-border-subtle px-2 py-1 text-xs text-muted hover:text-ink"
+          >
+            ✕
+          </button>
+        ) : null}
       </div>
 
       {/* Action bar */}
@@ -215,7 +252,7 @@ export default function PostingDetailPane({
             <div className="flex flex-col gap-1">
               <button
                 type="button"
-                disabled={savingComment || !commentDraft.trim()}
+                disabled={savingComment}
                 onClick={saveComment}
                 className="rounded-card border border-border-subtle px-3 py-1 text-sm disabled:opacity-40"
               >

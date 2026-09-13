@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   ApiError,
@@ -16,6 +17,7 @@ interface WatchlistTableProps {
 }
 
 export default function WatchlistTable({ companies, onCompaniesChange }: WatchlistTableProps) {
+  const navigate = useNavigate();
   const watchlisted = companies.filter((c) => c.short_listed);
   const [similarFor, setSimilarFor] = useState<string | null>(null);
   const [similarResults, setSimilarResults] = useState<SimilarEmployer[]>([]);
@@ -171,12 +173,13 @@ export default function WatchlistTable({ companies, onCompaniesChange }: Watchli
                       <ul className="space-y-1">
                         {postingsResults.map((p) => (
                           <li key={p.id} className="flex items-center justify-between text-xs">
-                            <a
-                              href={`/postings?selected=${p.id}`}
+                            <button
+                              type="button"
+                              onClick={() => navigate(`../postings?selected=${p.id}`)}
                               className="text-accent underline"
                             >
                               {p.title}
-                            </a>
+                            </button>
                             <span className="text-muted">
                               {p.posted_date ? new Date(p.posted_date).toLocaleDateString() : "—"}
                             </span>

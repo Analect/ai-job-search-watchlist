@@ -106,7 +106,7 @@ def get(job_posting_id: UUID | str) -> dict | None:
     return _row_to_dict_extended(row) if row else None
 
 
-def update_notes(job_posting_id: UUID | str, notes: str) -> dict | None:
+def update_notes(job_posting_id: UUID | str, notes: str | None) -> dict | None:
     """Write application_notes for the given posting.
 
     Returns the updated row dict, or None if no applications row exists.

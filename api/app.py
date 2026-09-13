@@ -68,7 +68,7 @@ class ApplicationStatusRequest(BaseModel):
 
 
 class ApplicationNotesRequest(BaseModel):
-    notes: str
+    notes: str | None = None
 
 
 @app.get("/healthz")

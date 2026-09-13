@@ -19,7 +19,7 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
   const [selected, setSelected] = useState<MapCompany | null>(null);
   const [mapSearch, setMapSearch] = useState("");
 
-  const { zoom, transform, selectionRect, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom } =
+  const { zoom, transform, selectionRect, isDragging, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom } =
     useRectZoom({ viewWidth: WIDTH, viewHeight: HEIGHT });
 
   const watchlistedCount = useMemo(() => companies.filter((c) => c.short_listed).length, [companies]);
@@ -129,7 +129,7 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
                           opacity={hovered && hovered.slug !== c.slug && !isSelected ? 0.35 : 0.85}
                           onMouseEnter={() => setHovered(c)}
                           onMouseLeave={() => setHovered((h) => (h?.slug === c.slug ? null : h))}
-                          onClick={() => { setSelected(c); }}
+                          onClick={() => { if (!isDragging) setSelected(c); }}
                           style={{ cursor: "pointer" }}
                         />
                       );

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import PostingDetailPane from "@/components/PostingDetailPane";
 import SplitPane from "@/components/SplitPane";
@@ -127,17 +128,19 @@ export default function PostingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [splitActive, setSplitActive] = useState(false);
   const [detail, setDetail] = useState<PostingDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailNotFound, setDetailNotFound] = useState(false);
 
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Pre-select posting from ?selected=<id> query param on initial mount.
+  // T011: Pre-select posting from ?selected=<id> query param on initial mount.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get("selected");
+    const id = searchParams.get("selected");
     if (id) selectPosting(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -186,6 +189,9 @@ export default function PostingsPage() {
     setSplitActive(true);
     setDetailLoading(true);
     setDetail(null);
+    setDetailNotFound(false);
+    // T010: write ?selected=<id> so the URL reflects the selection
+    setSearchParams((prev) => { prev.set("selected", id); return prev; });
     fetchPostingDetail(id)
       .then((d) => {
         setDetail(d);
@@ -197,7 +203,10 @@ export default function PostingsPage() {
           );
         }
       })
-      .catch(() => null)
+      .catch((err) => {
+        // T012: surface a clear "not found" state rather than a blank pane
+        if (err instanceof ApiError && err.status === 404) setDetailNotFound(true);
+      })
       .finally(() => setDetailLoading(false));
   };
 
@@ -302,7 +311,7 @@ export default function PostingsPage() {
           <select
             value={company}
             onChange={(e) => setCompany(e.target.value)}
-            className="rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink"
+            className="max-w-[200px] rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink"
           >
             <option value="">Any company</option>
             {watchlistCompanies.map((c) => (
@@ -318,13 +327,16 @@ export default function PostingsPage() {
           placeholder="Search title, description, skills…"
           className="min-w-[220px] flex-1 rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink placeholder:text-muted"
         />
+        {/* T014: icon-only refresh with tooltip to keep the toolbar single-row */}
         <button
           type="button"
           disabled={loading}
           onClick={() => setRefreshKey((k) => k + 1)}
-          className="rounded-card border border-border-subtle px-3 py-1.5 text-sm text-muted disabled:opacity-40"
+          title="Refresh"
+          aria-label="Refresh"
+          className="rounded-card border border-border-subtle px-2.5 py-1.5 text-base text-muted disabled:opacity-40"
         >
-          Refresh
+          ↻
         </button>
       </div>
 
@@ -433,6 +445,15 @@ export default function PostingsPage() {
           <PostingDetailPane
             detail={detail}
             loading={detailLoading}
+            notFound={detailNotFound}
+            onClose={() => {
+              // T045: collapse detail pane and clear ?selected from URL
+              setSplitActive(false);
+              setSelectedId(null);
+              setDetail(null);
+              setDetailNotFound(false);
+              setSearchParams((prev) => { prev.delete("selected"); return prev; });
+            }}
             onStateChange={handleStateChange}
           />
         }

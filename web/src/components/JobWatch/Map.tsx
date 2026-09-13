@@ -33,7 +33,7 @@ export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
   const [detail, setDetail] = useState<PostingDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const { zoom, transform, selectionRect, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom } =
+  const { zoom, transform, selectionRect, isDragging, onWheel, onPointerDown, onPointerMove, onPointerUp, resetZoom } =
     useRectZoom({ viewWidth: WIDTH, viewHeight: HEIGHT });
 
   const scale = useMemo(() => {
@@ -80,10 +80,16 @@ export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
     <SplitPane
       top={
         <div className="space-y-2 p-2">
-          <div className="flex items-center gap-3">
-            <p className="text-xs text-muted">
-              {jobs.length} postings · purple=promoted · green=flagged · scroll/shift+drag to zoom, drag to pan
-            </p>
+          <div className="flex flex-wrap items-center gap-3">
+            {(() => {
+              const promoted_count = jobs.filter((j) => j.promoted).length;
+              const flagged_count = jobs.filter((j) => j.flagged).length;
+              return (
+                <p className="text-xs text-muted">
+                  {jobs.length} postings · <span className="text-[var(--accent)]">■</span> {promoted_count} promoted · <span className="text-[var(--ok)]">■</span> {flagged_count} flagged · scroll/shift+drag to zoom, drag to pan
+                </p>
+              );
+            })()}
             <button
               type="button"
               onClick={resetZoom}
@@ -119,7 +125,7 @@ export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
                           opacity={hovered && hovered.id !== j.id && !isSelected ? 0.35 : 0.85}
                           onMouseEnter={() => setHovered(j)}
                           onMouseLeave={() => setHovered((h) => (h?.id === j.id ? null : h))}
-                          onClick={() => selectJob(j)}
+                          onClick={() => { if (!isDragging) selectJob(j); }}
                           style={{ cursor: "pointer" }}
                         />
                       );

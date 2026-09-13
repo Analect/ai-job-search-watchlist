@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 
 import {
   ApiError,
@@ -58,21 +58,46 @@ function layout(
   };
 }
 
-function collectLinks(
-  node: LayoutNode,
-  acc: Array<{ px: number; py: number; cx: number; cy: number }>,
-): void {
-  if (!node.left || !node.right) return;
-  acc.push({ px: node.x, py: node.y, cx: node.left.x, cy: node.left.y });
-  acc.push({ px: node.x, py: node.y, cx: node.right.x, cy: node.right.y });
-  collectLinks(node.left, acc);
-  collectLinks(node.right, acc);
+// T025/T026: nodeKey identifies an internal node by its distance for collapse tracking
+function nodeKey(node: LayoutNode): string {
+  return `n:${node.y.toFixed(4)}:${node.x.toFixed(2)}`;
 }
 
-function collectLeaves(node: LayoutNode, acc: LayoutNode[]): void {
+function collectLinks(
+  node: LayoutNode,
+  collapsed: Set<string>,
+  acc: Array<{ px: number; py: number; cx: number; cy: number; nodeKey: string }>,
+): void {
+  if (!node.left || !node.right) return;
+  const key = nodeKey(node);
+  acc.push({ px: node.x, py: node.y, cx: node.left.x, cy: node.left.y, nodeKey: key });
+  acc.push({ px: node.x, py: node.y, cx: node.right.x, cy: node.right.y, nodeKey: key });
+  if (!collapsed.has(key)) {
+    collectLinks(node.left, collapsed, acc);
+    collectLinks(node.right, collapsed, acc);
+  }
+}
+
+function collectLeaves(node: LayoutNode, collapsed: Set<string>, acc: LayoutNode[]): void {
   if (node.slug) { acc.push(node); return; }
-  if (node.left) collectLeaves(node.left, acc);
-  if (node.right) collectLeaves(node.right, acc);
+  const key = nodeKey(node);
+  if (collapsed.has(key)) {
+    // Treat collapsed internal node as a pseudo-leaf
+    acc.push({ ...node, slug: `__collapsed:${key}` });
+    return;
+  }
+  if (node.left) collectLeaves(node.left, collapsed, acc);
+  if (node.right) collectLeaves(node.right, collapsed, acc);
+}
+
+function collectInternalNodes(node: LayoutNode, collapsed: Set<string>, acc: LayoutNode[]): void {
+  if (node.slug) return;
+  acc.push(node);
+  const key = nodeKey(node);
+  if (!collapsed.has(key)) {
+    if (node.left) collectInternalNodes(node.left, collapsed, acc);
+    if (node.right) collectInternalNodes(node.right, collapsed, acc);
+  }
 }
 
 // --- Component ---
@@ -84,11 +109,19 @@ const MARGIN = 10;
 
 export default function UniverseTable({ companies, onCompaniesChange }: UniverseTableProps) {
   const [search, setSearch] = useState("");
+  const [industryFilter, setIndustryFilter] = useState("");  // T033: industry filter
   const [dendrogram, setDendrogram] = useState<{ slugs: string[]; tree: DendrogramNode } | null>(null);
   const [dendrogramError, setDendrogramError] = useState<string | null>(null);
-  const [view, setView] = useState<"table" | "tree">("table");
+  const [view, setView] = useState<"table" | "tree">("tree");  // default to tree per US8
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());  // T026: collapsed nodes
   const [message, setMessage] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  const industries = useMemo(() => {
+    const set = new Set<string>();
+    companies.forEach((c) => { if (c.industry) set.add(c.industry); });
+    return Array.from(set).sort();
+  }, [companies]);
 
   useEffect(() => {
     fetchDendrogram()
@@ -98,12 +131,12 @@ export default function UniverseTable({ companies, onCompaniesChange }: Universe
       );
   }, []);
 
-  const filtered = companies.filter(
-    (c) =>
-      !search ||
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      (c.industry ?? "").toLowerCase().includes(search.toLowerCase()),
-  );
+  // T032/T034: name text filter; T033/T034: industry filter; AND-combined when both set
+  const filtered = companies.filter((c) => {
+    const nameOk = !search || c.name.toLowerCase().includes(search.toLowerCase());
+    const industryOk = !industryFilter || (c.industry ?? "") === industryFilter;
+    return nameOk && industryOk;
+  });
 
   const companyBySlug = new Map(companies.map((c) => [c.slug, c]));
 
@@ -130,16 +163,25 @@ export default function UniverseTable({ companies, onCompaniesChange }: Universe
     } else if (!dendrogram) {
       dendrogramSvg = <p className="text-sm text-muted">Loading dendrogram…</p>;
     } else {
-      const nLeaves = dendrogram.slugs.length;
-      const svgHeight = nLeaves * ROW_HEIGHT + MARGIN * 2;
-      const svgWidth = TREE_WIDTH + LABEL_WIDTH + MARGIN * 2;
       const maxDist = findMaxDistance(dendrogram.tree);
       const root = layout(dendrogram.tree, maxDist, TREE_WIDTH, ROW_HEIGHT, { n: 0 });
-      const links: Array<{ px: number; py: number; cx: number; cy: number }> = [];
-      collectLinks(root, links);
+      const links: Array<{ px: number; py: number; cx: number; cy: number; nodeKey: string }> = [];
+      collectLinks(root, collapsed, links);
       const leaves: LayoutNode[] = [];
-      collectLeaves(root, leaves);
+      collectLeaves(root, collapsed, leaves);
+      const internalNodes: LayoutNode[] = [];
+      collectInternalNodes(root, collapsed, internalNodes);
+      const nLeaves = leaves.length;
+      const svgHeight = nLeaves * ROW_HEIGHT + MARGIN * 2;
+      const svgWidth = TREE_WIDTH + LABEL_WIDTH + MARGIN * 2;
       const searchLower = search.toLowerCase();
+      const toggleCollapse = (key: string) => {
+        setCollapsed((prev) => {
+          const next = new Set(prev);
+          if (next.has(key)) next.delete(key); else next.add(key);
+          return next;
+        });
+      };
 
       dendrogramSvg = (
         <div className="overflow-x-auto">
@@ -161,8 +203,41 @@ export default function UniverseTable({ companies, onCompaniesChange }: Universe
                   strokeWidth={0.8}
                 />
               ))}
+              {/* Internal node collapse handles */}
+              {internalNodes.map((node) => {
+                const key = nodeKey(node);
+                const isCollapsed = collapsed.has(key);
+                return (
+                  <g
+                    key={key}
+                    transform={`translate(${node.y}, ${node.x})`}
+                    onClick={() => toggleCollapse(key)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <circle r={4} fill="var(--surface)" stroke="var(--border-subtle)" strokeWidth={1} />
+                    <text x={-3} y={4} fontSize={8} fill="var(--muted)" style={{ userSelect: "none" }}>
+                      {isCollapsed ? "+" : "−"}
+                    </text>
+                  </g>
+                );
+              })}
               {/* Leaf labels */}
               {leaves.map((leaf) => {
+                const isCollapsedNode = leaf.slug?.startsWith("__collapsed:");
+                const key = isCollapsedNode ? leaf.slug!.slice("__collapsed:".length) : "";
+                if (isCollapsedNode) {
+                  return (
+                    <g
+                      key={leaf.slug}
+                      transform={`translate(${leaf.y}, ${leaf.x})`}
+                      onClick={() => toggleCollapse(key)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <circle r={4} fill="var(--muted)" stroke="var(--border-subtle)" strokeWidth={1} />
+                      <text x={8} y={4} fontSize={10} fill="var(--muted)">[collapsed group]</text>
+                    </g>
+                  );
+                }
                 const company = companyBySlug.get(leaf.slug ?? "");
                 const isWatchlisted = company?.short_listed ?? false;
                 const name = company?.name ?? leaf.slug ?? "";
@@ -202,6 +277,16 @@ export default function UniverseTable({ companies, onCompaniesChange }: Universe
           placeholder="Search companies…"
           className="flex-1 rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink placeholder:text-muted"
         />
+        <select
+          value={industryFilter}
+          onChange={(e) => setIndustryFilter(e.target.value)}
+          className="max-w-[180px] rounded-card border border-border-subtle bg-surface px-2 py-1.5 text-sm text-ink"
+        >
+          <option value="">All industries</option>
+          {industries.map((ind) => (
+            <option key={ind} value={ind}>{ind}</option>
+          ))}
+        </select>
         <div className="flex gap-1">
           <button
             type="button"
