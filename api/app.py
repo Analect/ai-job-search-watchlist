@@ -91,6 +91,36 @@ def readyz() -> dict:
     return {"db": "ok" if _db_ok() else "unreachable"}
 
 
+@app.get("/admin/scrape-health")
+def get_scrape_health(threshold: int = Query(default=3, ge=1)) -> dict:
+    """Return employers whose last N consecutive successful scrape runs all
+    yielded zero postings, indicating a potential adapter or config issue."""
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select e.slug, e.name, e.consecutive_zero_postings,
+                   e.last_successful_run_at
+              from employers e
+             where e.consecutive_zero_postings >= %s
+             order by e.consecutive_zero_postings desc, e.name
+            """,
+            (threshold,),
+        )
+        rows = cur.fetchall()
+    return {
+        "threshold": threshold,
+        "employers": [
+            {
+                "slug": r[0],
+                "name": r[1],
+                "consecutive_zero_postings": r[2],
+                "last_successful_run_at": r[3].isoformat() if r[3] else None,
+            }
+            for r in rows
+        ],
+    }
+
+
 @app.get("/postings")
 def get_postings(
     location: str | None = Query(default=None, pattern="^(london|dublin|other)$"),

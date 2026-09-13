@@ -51,16 +51,30 @@ def complete_scrape_run(
         )
         employer_id = _employer_id_for_run(cur, run_id)
         if status == "success":
-            cur.execute(
-                """
-                update employers
-                   set last_successful_run_at = now(),
-                       consecutive_failures = 0,
-                       last_error = null
-                 where id = %s
-                """,
-                (employer_id,),
-            )
+            if postings_found and postings_found > 0:
+                cur.execute(
+                    """
+                    update employers
+                       set last_successful_run_at = now(),
+                           consecutive_failures = 0,
+                           consecutive_zero_postings = 0,
+                           last_error = null
+                     where id = %s
+                    """,
+                    (employer_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    update employers
+                       set last_successful_run_at = now(),
+                           consecutive_failures = 0,
+                           consecutive_zero_postings = consecutive_zero_postings + 1,
+                           last_error = null
+                     where id = %s
+                    """,
+                    (employer_id,),
+                )
         else:
             cur.execute(
                 """
