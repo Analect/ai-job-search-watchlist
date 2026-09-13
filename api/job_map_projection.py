@@ -8,7 +8,12 @@ Mirrors api/map_projection.py's cache pattern exactly:
     same freshness reasoning as short_listed on the employer map.
   - Warmed in api/app.py's lifespan startup handler alongside
     get_projection() to avoid a cold-start 504.
+
+T061 (US17): JOB_MAP_UMAP_MIN_DIST env var controls UMAP clustering
+tightness at deployment time (default "0.1" matches prior behaviour).
 """
+
+import os
 
 from umap import UMAP
 
@@ -50,7 +55,11 @@ def _compute_job_projection() -> list[dict]:
         return []
 
     matrix = np.array(embeddings)
-    reducer = UMAP(n_components=2, metric="cosine", random_state=42)
+    try:
+        min_dist = float(os.environ.get("JOB_MAP_UMAP_MIN_DIST", "0.1"))
+    except (ValueError, TypeError):
+        min_dist = 0.1
+    reducer = UMAP(n_components=2, metric="cosine", random_state=42, min_dist=min_dist)
     coords = reducer.fit_transform(matrix)
 
     return [
