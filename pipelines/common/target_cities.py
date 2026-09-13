@@ -18,4 +18,7 @@ TARGET_CITIES: dict[str, tuple[str, str]] = {
 # lowercase alias segment -> canonical key in TARGET_CITIES
 CITY_ALIASES: dict[str, str] = {
     "greater london": "london",
+    # Fidelity International: "Cannon Street Office" — no comma, city name absent;
+    # the building name "Cannon Street" is a well-known City of London address.
+    "cannon street": "london",
 }

@@ -108,9 +108,34 @@ def _location_leading_segment(descriptor: str) -> str:
     """First comma-delimited segment of a Workday location descriptor,
     trimmed/casefolded - same exact-segment-match principle as the shared
     gazetteer's fix, applied here to structured facet values instead of
-    free-text location_raw."""
-    key = descriptor.split(",", 1)[0].strip().casefold()
-    return CITY_ALIASES.get(key, key)
+    free-text location_raw.
+
+    Some tenants omit the comma separator entirely, using one of:
+    - city + country with double-spaces: "London  United Kingdom" (Citi)
+    - city + qualifier with a space:    "Dublin Office - George's Quay House" (Fidelity)
+    - building name only:               "Cannon Street Office" (Fidelity)
+
+    For these, comma-split returns the whole string; two fallbacks resolve them:
+    1. First whitespace token — catches "london" / "dublin" directly.
+    2. Alias-prefix check — catches "cannon street office" via the
+       "cannon street" → "london" alias in CITY_ALIASES.
+    """
+    segment = descriptor.split(",", 1)[0].strip().casefold()
+    # Direct match or alias on the whole comma-segment (standard case)
+    key = CITY_ALIASES.get(segment, segment)
+    if key in TARGET_CITIES:
+        return key
+    # Tenants that omit the comma: try the first whitespace token
+    tokens = segment.split()
+    if tokens:
+        first = CITY_ALIASES.get(tokens[0], tokens[0])
+        if first in TARGET_CITIES:
+            return first
+    # Alias-prefix: "cannon street office".startswith("cannon street") → "london"
+    for alias, canonical in CITY_ALIASES.items():
+        if segment.startswith(alias):
+            return canonical
+    return segment
 
 
 def _target_location_ids(facets: list[dict]) -> list[str]:
