@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 import {
   ApiError,
   advanceApplicationStatus,
   fetchApplications,
+  fetchPostingDetail,
   generateDrafts,
   getDraftStatus,
   postPostingEvent,
@@ -42,6 +43,32 @@ export default function ApplicationsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [draftingId, setDraftingId] = useState<string | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // T046/T047: row selection + description fetch
+  const [selectedPostingId, setSelectedPostingId] = useState<string | null>(null);
+  const [descLoading, setDescLoading] = useState(false);
+  const [descText, setDescText] = useState<string | null>(null);
+
+  // T048/T049/T050: expand-to-edit notes
+  const [editingNotes, setEditingNotes] = useState(false);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
+  const saveNotesForId = useRef<string | null>(null);
+
+  useEffect(() => {
+    setDescLoading(false);
+    setDescText(null);
+    setEditingNotes(false);
+    setNotesDraft("");
+    setNotesError(null);
+    if (!selectedPostingId) return;
+    setDescLoading(true);
+    fetchPostingDetail(selectedPostingId)
+      .then((detail) => setDescText(detail.description ?? null))
+      .catch(() => setDescText(null))
+      .finally(() => setDescLoading(false));
+  }, [selectedPostingId]);
 
   useEffect(() => {
     fetchApplications()
@@ -149,6 +176,40 @@ export default function ApplicationsPage() {
       });
   };
 
+  const selectApp = (postingId: string) => {
+    setSelectedPostingId((prev) => (prev === postingId ? null : postingId));
+  };
+
+  const startEditNotes = (app: Application, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedPostingId(app.job_posting_id);
+    setNotesDraft(app.application_notes ?? "");
+    setEditingNotes(true);
+  };
+
+  const saveNotes = async (app: Application) => {
+    const id = app.job_posting_id;
+    saveNotesForId.current = id;
+    setSavingNotes(true);
+    setNotesError(null);
+    try {
+      await saveApplicationNotes(id, notesDraft.trim() || null);
+      if (saveNotesForId.current !== id) return;
+      setApplications((prev) =>
+        prev.map((a) =>
+          a.job_posting_id === id ? { ...a, application_notes: notesDraft.trim() || null } : a,
+        ),
+      );
+      setEditingNotes(false);
+    } catch (err) {
+      if (saveNotesForId.current === id) {
+        setNotesError(err instanceof ApiError ? err.message : (err as Error).message);
+      }
+    } finally {
+      if (saveNotesForId.current === id) setSavingNotes(false);
+    }
+  };
+
   if (loading) return <p className="py-6 text-center text-sm text-muted">Loading…</p>;
   if (error) return <p className="py-6 text-center text-sm text-danger">{error}</p>;
 
@@ -176,102 +237,190 @@ export default function ApplicationsPage() {
             </tr>
           </thead>
           <tbody>
-            {applications.map((app) => (
-              <tr key={app.id} className="border-b border-border-subtle last:border-b-0">
-                <td className="py-3 px-3">
-                  <p className="font-medium text-ink">{app.title}</p>
-                  <p className="text-xs text-muted">{app.employer_name}</p>
-                </td>
-                <td className={`py-3 px-3 ${STATUS_CLASS[app.status]}`}>
-                  {STATUS_LABEL[app.status]}
-                </td>
-                <td className="py-3 px-3">
-                  <textarea
-                    defaultValue={app.application_notes ?? ""}
-                    placeholder="Add guidance notes…"
-                    rows={2}
-                    className="w-full rounded-card border border-border-subtle bg-surface px-2 py-1 text-xs text-ink placeholder:text-muted"
-                    onBlur={(e) => {
-                      const val = e.target.value;
-                      if (val !== (app.application_notes ?? "")) {
-                        saveApplicationNotes(app.job_posting_id, val).catch(() => null);
-                        setApplications((prev) =>
-                          prev.map((a) =>
-                            a.id === app.id ? { ...a, application_notes: val } : a,
-                          ),
-                        );
-                      }
-                    }}
-                    style={{ minWidth: 140 }}
-                  />
-                </td>
-                <td className="py-3 px-3 text-muted">
-                  {app.resume_draft_mr_url ? (
-                    <div>
-                      <a
-                        href={app.resume_draft_mr_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-accent underline"
-                      >
-                        View MR
-                      </a>
-                      {app.draft_model_id ? (
-                        <p className="mt-0.5 text-xs text-muted">Model: {app.draft_model_id}</p>
-                      ) : null}
-                    </div>
-                  ) : app.draft_error ? (
-                    <p className="text-xs text-danger">{app.draft_error}</p>
-                  ) : (
-                    formatDate(app.draft_generated_at)
-                  )}
-                </td>
-                <td className="py-3 px-3">
-                  <div className="flex flex-wrap gap-2">
-                    {app.status === "promoted" && !app.resume_draft_mr_url ? (
-                      <button
-                        type="button"
-                        disabled={draftingId === app.job_posting_id}
-                        onClick={() => generateDraft(app)}
-                        className="rounded-card border border-border-subtle px-2 py-1 text-xs disabled:opacity-40"
-                      >
-                        {draftingId === app.job_posting_id ? "Generating…" : "Generate Drafts"}
-                      </button>
-                    ) : null}
+            {applications.map((app) => {
+              const isSelected = selectedPostingId === app.job_posting_id;
+              return (
+                <>
+                  <tr
+                    key={app.id}
+                    className={`border-b border-border-subtle cursor-pointer hover:bg-surface-raised ${isSelected ? "bg-surface-raised" : ""}`}
+                    onClick={() => selectApp(app.job_posting_id)}
+                  >
+                    <td className="py-3 px-3">
+                      <p className="font-medium text-ink">{app.title}</p>
+                      <p className="text-xs text-muted">{app.employer_name}</p>
+                    </td>
+                    <td className={`py-3 px-3 ${STATUS_CLASS[app.status]}`}>
+                      {STATUS_LABEL[app.status]}
+                    </td>
+                    <td className="py-3 px-3">
+                      <div className="flex items-center gap-1">
+                        <p className="flex-1 truncate text-xs text-ink" style={{ maxWidth: 160 }}>
+                          {app.application_notes ?? <span className="text-muted">—</span>}
+                        </p>
+                        <button
+                          type="button"
+                          title="Edit guidance notes"
+                          onClick={(e) => startEditNotes(app, e)}
+                          className="shrink-0 rounded px-1 text-muted hover:text-ink"
+                        >
+                          ✏️
+                        </button>
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 text-muted">
+                      {app.resume_draft_mr_url ? (
+                        <div>
+                          <a
+                            href={app.resume_draft_mr_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            View MR
+                          </a>
+                          {app.draft_model_id ? (
+                            <p className="mt-0.5 text-xs text-muted">Model: {app.draft_model_id}</p>
+                          ) : null}
+                        </div>
+                      ) : app.draft_error ? (
+                        <p className="text-xs text-danger">{app.draft_error}</p>
+                      ) : (
+                        formatDate(app.draft_generated_at)
+                      )}
+                    </td>
+                    <td className="py-3 px-3">
+                      <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                        {app.status === "promoted" && !app.resume_draft_mr_url ? (
+                          <button
+                            type="button"
+                            disabled={draftingId === app.job_posting_id}
+                            onClick={() => generateDraft(app)}
+                            className="rounded-card border border-border-subtle px-2 py-1 text-xs disabled:opacity-40"
+                          >
+                            {draftingId === app.job_posting_id ? "Generating…" : "Generate Drafts"}
+                          </button>
+                        ) : null}
 
-                    {app.status === "promoted" ? (
-                      <button
-                        type="button"
-                        onClick={() => advanceStatus(app, "drafting")}
-                        className="rounded-card border border-ok px-2 py-1 text-xs text-ok"
-                      >
-                        → Drafting
-                      </button>
-                    ) : null}
+                        {app.status === "promoted" ? (
+                          <button
+                            type="button"
+                            onClick={() => advanceStatus(app, "drafting")}
+                            className="rounded-card border border-ok px-2 py-1 text-xs text-ok"
+                          >
+                            → Drafting
+                          </button>
+                        ) : null}
 
-                    {app.status === "drafting" ? (
-                      <button
-                        type="button"
-                        onClick={() => advanceStatus(app, "submitted")}
-                        className="rounded-card border border-accent px-2 py-1 text-xs text-accent"
-                      >
-                        Mark Submitted
-                      </button>
-                    ) : null}
+                        {app.status === "drafting" ? (
+                          <button
+                            type="button"
+                            onClick={() => advanceStatus(app, "submitted")}
+                            className="rounded-card border border-accent px-2 py-1 text-xs text-accent"
+                          >
+                            Mark Submitted
+                          </button>
+                        ) : null}
 
-                    {app.status !== "withdrawn" ? (
-                      <button
-                        type="button"
-                        onClick={() => withdraw(app)}
-                        className="rounded-card border border-danger px-2 py-1 text-xs text-danger"
-                      >
-                        Withdraw
-                      </button>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            ))}
+                        {app.status !== "withdrawn" ? (
+                          <button
+                            type="button"
+                            onClick={() => withdraw(app)}
+                            className="rounded-card border border-danger px-2 py-1 text-xs text-danger"
+                          >
+                            Withdraw
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                  {isSelected ? (
+                    <tr key={`${app.id}-detail`} className="border-b border-border-subtle bg-surface-raised">
+                      <td colSpan={5} className="px-3 pb-4 pt-2">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          {/* T047: description read-only */}
+                          <div>
+                            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
+                              Job Description
+                            </p>
+                            {descLoading ? (
+                              <p className="text-sm text-muted">Loading…</p>
+                            ) : descText ? (
+                              <div
+                                className="prose prose-sm max-w-none overflow-y-auto rounded-card border border-border-subtle bg-surface p-3 text-ink"
+                                style={{ maxHeight: 260 }}
+                                dangerouslySetInnerHTML={{ __html: descText }}
+                              />
+                            ) : (
+                              <p className="text-sm text-muted">Description unavailable.</p>
+                            )}
+                          </div>
+                          {/* T048/T049/T050: expand-to-edit notes */}
+                          <div>
+                            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
+                              Guidance Notes
+                            </p>
+                            {editingNotes ? (
+                              <div className="flex flex-col gap-2">
+                                {notesError ? (
+                                  <p className="text-xs text-danger">{notesError}</p>
+                                ) : null}
+                                <textarea
+                                  autoFocus
+                                  value={notesDraft}
+                                  onChange={(e) => setNotesDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Escape") setEditingNotes(false);
+                                  }}
+                                  rows={6}
+                                  className="w-full rounded-card border border-border-subtle bg-surface px-3 py-1.5 text-sm text-ink"
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={savingNotes}
+                                    onClick={() => saveNotes(app)}
+                                    className="rounded-card border border-border-subtle px-3 py-1 text-sm disabled:opacity-40"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingNotes(false)}
+                                    className="rounded-card border border-border-subtle px-3 py-1 text-sm text-muted"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start gap-2 rounded-card border border-border-subtle bg-surface p-3">
+                                <p className="flex-1 text-sm text-ink">
+                                  {app.application_notes ? (
+                                    app.application_notes
+                                  ) : (
+                                    <span className="text-muted">No guidance notes yet.</span>
+                                  )}
+                                </p>
+                                <button
+                                  type="button"
+                                  title="Edit guidance notes"
+                                  onClick={(e) => startEditNotes(app, e)}
+                                  className="shrink-0 rounded-card border border-border-subtle px-2 py-1 text-xs text-muted"
+                                >
+                                  ✏️
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </>
+              );
+            })}
           </tbody>
         </table>
       </div>
