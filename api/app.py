@@ -19,6 +19,8 @@ identity before any request reaches this Component.
 from contextlib import asynccontextmanager
 from uuid import UUID
 
+import requests
+
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -38,7 +40,7 @@ from pipelines.common.postings import (
 )
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
-from api.drafting import generate_drafts
+from api.drafting import DraftAlreadyMergedError, generate_drafts, get_draft_files, merge_draft, update_draft_files
 
 
 @asynccontextmanager
@@ -345,3 +347,55 @@ def get_draft_status(job_posting_id: UUID) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail="no application found for this posting")
     return result
+
+
+@app.get("/applications/{job_posting_id}/draft-files")
+def get_application_draft_files(job_posting_id: UUID) -> dict:
+    draft = apps_module.get_draft_info(job_posting_id)
+    if draft is None or not draft.get("resume_draft_mr_url"):
+        raise HTTPException(status_code=404, detail="no draft on record for this application")
+    try:
+        return get_draft_files(
+            draft["resume_draft_branch"],
+            draft["resume_draft_path"],
+            draft["cover_letter_draft_path"],
+        )
+    except requests.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitLab API error: {exc}")
+
+
+class DraftFilesBody(BaseModel):
+    resume: str
+    cover_letter: str
+
+
+@app.patch("/applications/{job_posting_id}/draft-files")
+def patch_application_draft_files(job_posting_id: UUID, body: DraftFilesBody) -> dict:
+    draft = apps_module.get_draft_info(job_posting_id)
+    if draft is None or not draft.get("resume_draft_mr_url"):
+        raise HTTPException(status_code=404, detail="no draft on record for this application")
+    try:
+        return update_draft_files(
+            draft["resume_draft_branch"],
+            draft["resume_draft_path"],
+            draft["cover_letter_draft_path"],
+            body.resume,
+            body.cover_letter,
+        )
+    except requests.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitLab API error: {exc}")
+
+
+@app.post("/applications/{job_posting_id}/draft-merge")
+def post_draft_merge(job_posting_id: UUID) -> dict:
+    draft = apps_module.get_draft_info(job_posting_id)
+    if draft is None or not draft.get("resume_draft_mr_url"):
+        raise HTTPException(status_code=404, detail="no draft on record for this application")
+    try:
+        result = merge_draft(draft["resume_draft_mr_url"])
+    except DraftAlreadyMergedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except requests.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitLab merge failed: {exc}")
+    apps_module.advance_status(job_posting_id, "submitted")
+    return {"status": "submitted", "final_url": result["final_url"]}

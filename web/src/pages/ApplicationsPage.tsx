@@ -6,10 +6,14 @@ import {
   fetchApplications,
   fetchPostingDetail,
   generateDrafts,
+  getDraftFiles,
   getDraftStatus,
+  mergeDraft,
   postPostingEvent,
   saveApplicationNotes,
+  saveDraftFiles,
   type Application,
+  type DraftFiles,
   type DraftResult,
 } from "@/lib/api";
 
@@ -55,6 +59,15 @@ export default function ApplicationsPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
   const saveNotesForId = useRef<string | null>(null);
+
+  // T058-T060: in-app draft viewer/editor
+  const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
+  const [draftFiles, setDraftFiles] = useState<DraftFiles | null>(null);
+  const [draftLoading, setDraftLoading] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const [draftMerging, setDraftMerging] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftFinalUrl, setDraftFinalUrl] = useState<string | null>(null);
 
   useEffect(() => {
     setDescLoading(false);
@@ -210,6 +223,59 @@ export default function ApplicationsPage() {
     }
   };
 
+  const openDraftPanel = (app: Application, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedPostingId(app.job_posting_id);
+    setDraftPanelId(app.job_posting_id);
+    setDraftFiles(null);
+    setDraftError(null);
+    setDraftFinalUrl(null);
+    setDraftLoading(true);
+    getDraftFiles(app.job_posting_id)
+      .then((files) => { setDraftFiles(files); })
+      .catch((err) => {
+        setDraftError(err instanceof ApiError ? err.message : (err as Error).message);
+      })
+      .finally(() => setDraftLoading(false));
+  };
+
+  const closeDraftPanel = () => {
+    setDraftPanelId(null);
+    setDraftFiles(null);
+    setDraftError(null);
+    setDraftFinalUrl(null);
+  };
+
+  const saveDraft = async (app: Application) => {
+    if (!draftFiles) return;
+    setDraftSaving(true);
+    setDraftError(null);
+    try {
+      await saveDraftFiles(app.job_posting_id, draftFiles.resume, draftFiles.cover_letter);
+    } catch (err) {
+      setDraftError(err instanceof ApiError ? err.message : (err as Error).message);
+    } finally {
+      setDraftSaving(false);
+    }
+  };
+
+  const doMergeDraft = async (app: Application) => {
+    setDraftMerging(true);
+    setDraftError(null);
+    try {
+      const result = await mergeDraft(app.job_posting_id);
+      setDraftFinalUrl(result.final_url);
+      setApplications((prev) =>
+        prev.map((a) => (a.job_posting_id === app.job_posting_id ? { ...a, status: "submitted" } : a)),
+      );
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : (err as Error).message;
+      setDraftError(err instanceof ApiError && err.status === 409 ? `Already merged: ${msg}` : msg);
+    } finally {
+      setDraftMerging(false);
+    }
+  };
+
   if (loading) return <p className="py-6 text-center text-sm text-muted">Loading…</p>;
   if (error) return <p className="py-6 text-center text-sm text-danger">{error}</p>;
 
@@ -313,6 +379,16 @@ export default function ApplicationsPage() {
                           </button>
                         ) : null}
 
+                        {app.status === "drafting" && app.resume_draft_mr_url ? (
+                          <button
+                            type="button"
+                            onClick={(e) => openDraftPanel(app, e)}
+                            className="rounded-card border border-ok px-2 py-1 text-xs text-ok"
+                          >
+                            See Draft
+                          </button>
+                        ) : null}
+
                         {app.status === "drafting" ? (
                           <button
                             type="button"
@@ -356,6 +432,78 @@ export default function ApplicationsPage() {
                               <p className="text-sm text-muted">Description unavailable.</p>
                             )}
                           </div>
+                          {/* T058-T060: in-app draft viewer/editor */}
+                          {draftPanelId === app.job_posting_id ? (
+                            <div className="md:col-span-2">
+                              <div className="mb-1 flex items-center gap-2">
+                                <p className="text-xs font-medium uppercase tracking-wide text-muted">
+                                  Draft Documents
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={closeDraftPanel}
+                                  className="ml-auto text-xs text-muted hover:text-ink"
+                                >
+                                  ✕ Close
+                                </button>
+                              </div>
+                              {draftLoading ? (
+                                <p className="text-sm text-muted">Loading drafts…</p>
+                              ) : draftError ? (
+                                <p className="text-sm text-danger">{draftError}</p>
+                              ) : draftFinalUrl ? (
+                                <p className="text-sm text-ok">
+                                  Submitted.{" "}
+                                  <a href={draftFinalUrl} target="_blank" rel="noreferrer" className="underline">
+                                    View final documents
+                                  </a>
+                                </p>
+                              ) : draftFiles ? (
+                                <div className="flex flex-col gap-3">
+                                  <div>
+                                    <p className="mb-1 text-xs text-muted">Resume</p>
+                                    <textarea
+                                      value={draftFiles.resume}
+                                      onChange={(e) => setDraftFiles({ ...draftFiles, resume: e.target.value })}
+                                      rows={10}
+                                      className="w-full rounded-card border border-border-subtle bg-surface px-3 py-1.5 font-mono text-xs text-ink"
+                                    />
+                                  </div>
+                                  <div>
+                                    <p className="mb-1 text-xs text-muted">Cover Letter</p>
+                                    <textarea
+                                      value={draftFiles.cover_letter}
+                                      onChange={(e) => setDraftFiles({ ...draftFiles, cover_letter: e.target.value })}
+                                      rows={10}
+                                      className="w-full rounded-card border border-border-subtle bg-surface px-3 py-1.5 font-mono text-xs text-ink"
+                                    />
+                                  </div>
+                                  {draftError ? (
+                                    <p className="text-xs text-danger">{draftError}</p>
+                                  ) : null}
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={draftSaving}
+                                      onClick={() => saveDraft(app)}
+                                      className="rounded-card border border-border-subtle px-3 py-1 text-sm disabled:opacity-40"
+                                    >
+                                      {draftSaving ? "Saving…" : "Save"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={draftMerging}
+                                      onClick={() => doMergeDraft(app)}
+                                      className="rounded-card border border-accent px-3 py-1 text-sm text-accent disabled:opacity-40"
+                                    >
+                                      {draftMerging ? "Merging…" : "Merge & Submit"}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+
                           {/* T048/T049/T050: expand-to-edit notes */}
                           <div>
                             <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">

@@ -204,6 +204,79 @@ def _open_mr(branch_name: str, title: str) -> str:
     return resp.json()["web_url"]
 
 
+class DraftAlreadyMergedError(Exception):
+    pass
+
+
+def get_draft_files(branch: str, resume_path: str, cover_letter_path: str) -> dict:
+    """Fetch the current typst content of both draft files from the MR branch."""
+    import urllib.parse
+
+    headers = _gitlab_headers()
+
+    def _fetch(path: str) -> str:
+        encoded = urllib.parse.quote(path, safe="")
+        resp = requests.get(
+            f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/files/{encoded}/raw",
+            headers=headers,
+            params={"ref": branch},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.text
+
+    return {"resume": _fetch(resume_path), "cover_letter": _fetch(cover_letter_path)}
+
+
+def update_draft_files(
+    branch: str,
+    resume_path: str,
+    cover_letter_path: str,
+    resume: str,
+    cover_letter: str,
+) -> dict:
+    """Commit updated resume and cover letter back to the MR branch in one commit."""
+    resp = requests.post(
+        f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/commits",
+        headers=_gitlab_headers(),
+        json={
+            "branch": branch,
+            "commit_message": "Update application drafts",
+            "actions": [
+                {"action": "update", "file_path": resume_path, "content": resume, "encoding": "text"},
+                {"action": "update", "file_path": cover_letter_path, "content": cover_letter, "encoding": "text"},
+            ],
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    committed_at = data.get("committed_date") or data.get("created_at", "")
+    return {"committed_at": committed_at}
+
+
+def merge_draft(mr_url: str) -> dict:
+    """Merge the draft MR. Raises DraftAlreadyMergedError if already merged/closed.
+    Returns {"final_url": "..."} on success."""
+    m = re.search(r"/merge_requests/(\d+)", mr_url)
+    if not m:
+        raise ValueError(f"cannot parse MR IID from URL: {mr_url!r}")
+    mr_iid = m.group(1)
+
+    resp = requests.put(
+        f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}/merge",
+        headers=_gitlab_headers(),
+        timeout=20,
+    )
+    if resp.status_code == 405:
+        raise DraftAlreadyMergedError("MR branch is already merged or closed")
+    resp.raise_for_status()
+
+    branch = resp.json().get("source_branch", "")
+    final_url = f"https://gitlab.analect.com/mccoole/resume/-/tree/main/typst/{branch}"
+    return {"final_url": final_url}
+
+
 def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     """Generate resume/cover-letter drafts for a posting and push to the
     resume repo as a reviewable MR.  Returns the draft metadata dict."""

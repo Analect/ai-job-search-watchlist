@@ -258,6 +258,32 @@ export function getDraftStatus(job_posting_id: string): Promise<DraftResult> {
   return request(`/applications/${job_posting_id}/draft-status`);
 }
 
+export interface DraftFiles {
+  resume: string;
+  cover_letter: string;
+}
+
+export function getDraftFiles(job_posting_id: string): Promise<DraftFiles> {
+  return request(`/applications/${job_posting_id}/draft-files`);
+}
+
+export function saveDraftFiles(
+  job_posting_id: string,
+  resume: string,
+  cover_letter: string,
+): Promise<{ committed_at: string }> {
+  return request(`/applications/${job_posting_id}/draft-files`, {
+    method: "PATCH",
+    body: JSON.stringify({ resume, cover_letter }),
+  });
+}
+
+export function mergeDraft(
+  job_posting_id: string,
+): Promise<{ status: string; final_url: string }> {
+  return request(`/applications/${job_posting_id}/draft-merge`, { method: "POST" });
+}
+
 export function saveApplicationNotes(
   job_posting_id: string,
   notes: string,
