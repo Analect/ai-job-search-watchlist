@@ -7,6 +7,25 @@ function formatNanoseconds(ns: string | number | undefined): string | null {
   return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
+const EVENT_LABELS: Record<string, string> = {
+  "gen_ai.user.message": "Prompt",
+  "gen_ai.assistant.message": "Response",
+};
+
+function SpanEventBlock({ name, content }: { name: string; content: string }) {
+  const label = EVENT_LABELS[name] ?? name;
+  return (
+    <details className="mt-2">
+      <summary className="cursor-pointer select-none text-xs font-medium text-muted hover:text-ink">
+        {label} ({content.length.toLocaleString()} chars)
+      </summary>
+      <pre className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded border border-border-subtle bg-bubble p-2 text-[10px] text-ink">
+        {content}
+      </pre>
+    </details>
+  );
+}
+
 function SpanDetails({ span }: { span: TraceSpan }) {
   const attrs = span.attributes ?? {};
   const rows: Array<[string, string]> = [];
@@ -26,6 +45,18 @@ function SpanDetails({ span }: { span: TraceSpan }) {
 
   const duration = formatNanoseconds(span.durationNano);
 
+  const events: Array<{ name: string; content: string }> = [];
+  const rawEvents = (span as Record<string, unknown>)["events"];
+  if (Array.isArray(rawEvents)) {
+    for (const ev of rawEvents) {
+      const evName = typeof ev?.name === "string" ? ev.name : "";
+      const content = ev?.attributes?.content;
+      if (evName && typeof content === "string" && content.length > 0) {
+        events.push({ name: evName, content });
+      }
+    }
+  }
+
   return (
     <div className="space-y-2">
       <div className="flex items-start justify-between gap-2">
@@ -42,6 +73,9 @@ function SpanDetails({ span }: { span: TraceSpan }) {
           ))}
         </dl>
       ) : null}
+      {events.map((ev) => (
+        <SpanEventBlock key={ev.name} name={ev.name} content={ev.content} />
+      ))}
     </div>
   );
 }
