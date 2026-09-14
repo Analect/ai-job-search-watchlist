@@ -20,10 +20,8 @@ interface JobWatchMapProps {
 }
 
 function jobColor(j: MapJob): string {
-  if (j.promoted) return "var(--accent)";
-  if (j.flagged)  return "var(--ok)";
-  // thumbs_up/thumbs_down come through as review_state on the MapJob type;
-  // fall through to muted for all other states.
+  if (j.promoted) return "cornflowerblue";
+  if (j.flagged)  return "crimson";
   return "var(--muted)";
 }
 
@@ -86,7 +84,7 @@ export default function JobWatchMap({ jobs, onJobsChange }: JobWatchMapProps) {
               const flagged_count = jobs.filter((j) => j.flagged).length;
               return (
                 <p className="text-xs text-muted">
-                  {jobs.length} postings · <span className="text-[var(--accent)]">■</span> {promoted_count} promoted · <span className="text-[var(--ok)]">■</span> {flagged_count} flagged · scroll/shift+drag to zoom, drag to pan
+                  {jobs.length} postings · <span style={{ color: "cornflowerblue" }}>■</span> {promoted_count} promoted · <span style={{ color: "crimson" }}>■</span> {flagged_count} flagged · scroll/shift+drag to zoom, drag to pan
                 </p>
               );
             })()}
