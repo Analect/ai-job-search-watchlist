@@ -11,6 +11,7 @@ dist/
 # Node / web
 web/node_modules/
 web/dist/
+web/tsconfig*.tsbuildinfo
 *.log
 .env
 .env.local
