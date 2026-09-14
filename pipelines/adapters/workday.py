@@ -285,6 +285,7 @@ def fetch_postings(employer: Employer) -> Iterator[dict[str, Any]]:
     if not (company and wd_instance and site):
         return
 
+    seen_ids: set[str] = set()
     for item in _list_postings(company, wd_instance, site):
         external_path = item.get("externalPath")
         if not external_path:
@@ -317,8 +318,13 @@ def fetch_postings(employer: Employer) -> Iterator[dict[str, Any]]:
             # captured above rather than dropping the posting entirely.
             pass
 
+        external_id = req_id or external_path
+        if external_id in seen_ids:
+            print(f"[workday] {employer.slug}: skipping duplicate external_id {external_id!r}", flush=True)
+            continue
+        seen_ids.add(external_id)
         yield {
-            "external_id": req_id or external_path,
+            "external_id": external_id,
             "title": clean_text(item.get("title")),
             "source_url": _job_url(company, wd_instance, site, external_path),
             "location_raw": location_raw,

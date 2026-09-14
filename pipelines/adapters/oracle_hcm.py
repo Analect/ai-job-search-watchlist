@@ -125,11 +125,16 @@ def fetch_postings(employer: Employer) -> Iterator[dict[str, Any]]:
     if not (host and site):
         return
 
+    seen_ids: set[str] = set()
     for item in _list_postings(host, site):
         req_id = item.get("Id")
         if not req_id:
             continue
         req_id = str(req_id)
+        if req_id in seen_ids:
+            print(f"[oracle_hcm] {employer.slug}: skipping duplicate external_id {req_id!r}", flush=True)
+            continue
+        seen_ids.add(req_id)
         primary_location = item.get("PrimaryLocation")
         if not _location_matches_target(primary_location):
             continue  # server-side-free filter: skip the expensive detail fetch entirely
