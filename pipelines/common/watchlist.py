@@ -73,7 +73,7 @@ matched as (
             else coalesce(rb.monitor_config, '{{}}'::jsonb)
         end as ats_config
     from jseek_companies c
-    left join jseek_industries i on i.id = c.industry_id
+    left join jseek_industries i on i.id = c.industry_id::integer
     left join ranked_boards rb on rb.company_slug = c.slug and rb.rn = 1
     where c.slug = %(slug)s
 )

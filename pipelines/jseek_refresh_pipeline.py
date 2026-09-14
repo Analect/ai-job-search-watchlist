@@ -63,6 +63,7 @@ def companies_resource():
             "name": row.get("name"),
             "website": row.get("website"),
             "industry_id": row.get("industry") or None,
+            "employee_count_range": row.get("employee_count_range") or None,
             "same_as": same_as,
             "wikidata_id": wikidata_id,
             "logo_url": logo_url,
@@ -74,16 +75,23 @@ def companies_resource():
     name="jseek_boards",
     primary_key=["company_slug", "board_slug"],
     write_disposition={"disposition": "merge", "strategy": "upsert"},
+    columns={"monitor_config": {"data_type": "json"}},
 )
 def boards_resource():
     rows = _fetch_csv("boards.csv")
     print(f"[jseek] {len(rows)} boards fetched", flush=True)
     for row in rows:
+        raw_config = row.get("monitor_config") or ""
+        try:
+            monitor_config = json.loads(raw_config) if raw_config.strip() else None
+        except (json.JSONDecodeError, TypeError):
+            monitor_config = None
         yield {
             "company_slug": row["company_slug"],
             "board_slug": row["board_slug"],
             "monitor_type": row.get("monitor_type"),
             "board_url": row.get("board_url"),
+            "monitor_config": monitor_config,
         }
 
 

@@ -103,7 +103,7 @@ matched as (
     end as ats_config
   from _shortlist_names s
   join jseek_companies c on c.name = s.company_name
-  left join jseek_industries i on i.id = c.industry_id
+  left join jseek_industries i on i.id = c.industry_id::integer
   left join ranked_boards rb on rb.company_slug = c.slug and rb.rn = 1
 )
 insert into employers (slug, name, website, industry, employee_count_range,
