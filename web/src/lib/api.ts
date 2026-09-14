@@ -286,7 +286,7 @@ export function mergeDraft(
 
 export function saveApplicationNotes(
   job_posting_id: string,
-  notes: string,
+  notes: string | null,
 ): Promise<Application> {
   return request(`/applications/${job_posting_id}/notes`, {
     method: "PATCH",
