@@ -495,8 +495,11 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
 
     now = datetime.now(tz=timezone.utc)
     date_str = now.strftime("%Y%m%d")
+    # Include hour+minute so re-drafts on the same day get a unique branch name
+    # and never collide with the branch being deleted in post_redraft.
+    datetime_str = now.strftime("%Y%m%d-%H%M")
     slug = _slugify(f"{employer}-{title}")
-    branch_name = f"{date_str}-{slug}"
+    branch_name = f"{datetime_str}-{slug}"
     folder = branch_name
 
     resume_tmpl = _fetch_template(_RESUME_EXAMPLE)
