@@ -32,6 +32,23 @@ export interface UseRectZoomResult {
 
 type Mode = "idle" | "panning" | "selecting";
 
+// Convert a client-space point to SVG viewBox space using getScreenCTM so the
+// result is correct regardless of how the SVG element is scaled or letterboxed
+// inside its CSS container (e.g. w-full with a narrower viewBox).
+function clientToSvg(el: Element, clientX: number, clientY: number): { x: number; y: number } {
+  const svg = el as SVGSVGElement;
+  const ctm = svg.getScreenCTM();
+  if (!ctm) {
+    const r = el.getBoundingClientRect();
+    return { x: clientX - r.left, y: clientY - r.top };
+  }
+  const pt = svg.createSVGPoint();
+  pt.x = clientX;
+  pt.y = clientY;
+  const { x, y } = pt.matrixTransform(ctm.inverse());
+  return { x, y };
+}
+
 interface PointerState {
   mode: Mode;
   // startX/Y are in SVG-element-local coordinates (clientX - svgRect.left)
@@ -84,15 +101,12 @@ export function useRectZoom({
 
   const onPointerDown = useCallback((e: React.PointerEvent<Element>) => {
     const mode: Mode = e.shiftKey ? "selecting" : "panning";
-    // T019/T020: convert client coords to SVG-element-local coords at pointer-down.
-    // This makes the selection rect and zoom computation share the same reference
-    // frame, so the rectangle origin matches the actual pointer-down position even
-    // after the map has been panned or scaled.
-    const svgRect = (e.currentTarget as Element).getBoundingClientRect();
-    const lx = e.clientX - svgRect.left;
-    const ly = e.clientY - svgRect.top;
-    // T020: clamp — ignore a drag-start outside the SVG's own bounds
-    if (lx < 0 || ly < 0 || lx > svgRect.width || ly > svgRect.height) return;
+    // Convert client coords to SVG viewBox space so the selection rect and zoom
+    // computation are in the same coordinate system regardless of how the SVG
+    // element is scaled inside its CSS container.
+    const { x: lx, y: ly } = clientToSvg(e.currentTarget, e.clientX, e.clientY);
+    // Clamp — ignore a drag-start outside the SVG viewBox bounds
+    if (lx < 0 || ly < 0 || lx > viewWidth || ly > viewHeight) return;
     ptrState.current = {
       mode,
       startX: lx,
@@ -108,9 +122,7 @@ export function useRectZoom({
   const onPointerMove = useCallback((e: React.PointerEvent<Element>) => {
     const s = ptrState.current;
     if (!s) return;
-    const svgRect = (e.currentTarget as Element).getBoundingClientRect();
-    const lx = e.clientX - svgRect.left;
-    const ly = e.clientY - svgRect.top;
+    const { x: lx, y: ly } = clientToSvg(e.currentTarget, e.clientX, e.clientY);
     if (s.mode === "panning") {
       const dx = lx - s.startX;
       const dy = ly - s.startY;
@@ -134,9 +146,7 @@ export function useRectZoom({
 
       if (s.mode === "selecting") {
         setSelectionRect(null);
-        const svgRect = (e.currentTarget as SVGElement).getBoundingClientRect();
-        const lx = e.clientX - svgRect.left;
-        const ly = e.clientY - svgRect.top;
+        const { x: lx, y: ly } = clientToSvg(e.currentTarget, e.clientX, e.clientY);
         const rectW = Math.abs(lx - s.startX);
         const rectH = Math.abs(ly - s.startY);
         // Ignore tiny rects (clicks)
