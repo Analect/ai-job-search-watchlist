@@ -38,6 +38,10 @@ def _fetch_csv(filename: str) -> list[dict]:
     name="jseek_companies",
     primary_key="slug",
     write_disposition={"disposition": "merge", "strategy": "upsert"},
+    columns={
+        "industry_id": {"data_type": "text"},
+        "same_as": {"data_type": "json"},
+    },
 )
 def companies_resource():
     rows = _fetch_csv("companies.csv")
