@@ -62,7 +62,7 @@ def companies_resource():
             "slug": row["slug"],
             "name": row.get("name"),
             "website": row.get("website"),
-            "industry_id": row.get("industry_id") or None,
+            "industry_id": row.get("industry") or None,
             "same_as": same_as,
             "wikidata_id": wikidata_id,
             "logo_url": logo_url,
