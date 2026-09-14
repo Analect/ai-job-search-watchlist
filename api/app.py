@@ -40,7 +40,7 @@ from pipelines.common.postings import (
 )
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
-from api.drafting import DraftAlreadyMergedError, generate_drafts, get_draft_files, merge_draft, update_draft_files
+from api.drafting import DraftAlreadyMergedError, close_mr, generate_drafts, get_draft_files, merge_draft, update_draft_files
 
 
 @asynccontextmanager
@@ -399,3 +399,32 @@ def post_draft_merge(job_posting_id: UUID) -> dict:
         raise HTTPException(status_code=502, detail=f"GitLab merge failed: {exc}")
     apps_module.advance_status(job_posting_id, "submitted")
     return {"status": "submitted", "final_url": result["final_url"]}
+
+
+@app.post("/applications/{job_posting_id}/redraft")
+def post_redraft(
+    job_posting_id: UUID, background_tasks: BackgroundTasks
+) -> JSONResponse:
+    app_row = apps_module.get(job_posting_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="no application found for this posting")
+
+    detail = get_job_detail(job_posting_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="posting not found")
+    if detail.get("description") is None:
+        raise HTTPException(
+            status_code=422,
+            detail="cannot redraft: no job description captured for this posting",
+        )
+
+    existing_mr_url = app_row.get("resume_draft_mr_url")
+    if existing_mr_url:
+        try:
+            close_mr(existing_mr_url)
+        except requests.HTTPError:
+            pass  # already closed/merged — proceed anyway
+
+    apps_module.set_draft_pending(job_posting_id)
+    background_tasks.add_task(_run_generate_drafts, job_posting_id, detail)
+    return JSONResponse(status_code=202, content={"status": "pending"})

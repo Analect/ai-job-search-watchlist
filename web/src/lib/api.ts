@@ -254,6 +254,10 @@ export function generateDrafts(job_posting_id: string): Promise<DraftResult> {
   return request(`/applications/${job_posting_id}/generate-drafts`, { method: "POST" });
 }
 
+export function redraft(job_posting_id: string): Promise<DraftResult> {
+  return request(`/applications/${job_posting_id}/redraft`, { method: "POST" });
+}
+
 export function getDraftStatus(job_posting_id: string): Promise<DraftResult> {
   return request(`/applications/${job_posting_id}/draft-status`);
 }

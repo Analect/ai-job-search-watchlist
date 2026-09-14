@@ -255,6 +255,20 @@ def update_draft_files(
     return {"committed_at": committed_at}
 
 
+def close_mr(mr_url: str) -> None:
+    """Close (not merge) the draft MR. No-ops if already closed or merged."""
+    m = re.search(r"/merge_requests/(\d+)", mr_url)
+    if not m:
+        return
+    mr_iid = m.group(1)
+    requests.put(
+        f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}",
+        headers=_gitlab_headers(),
+        json={"state_event": "close"},
+        timeout=20,
+    ).raise_for_status()
+
+
 def merge_draft(mr_url: str) -> dict:
     """Merge the draft MR. Raises DraftAlreadyMergedError if already merged/closed.
     Returns {"final_url": "..."} on success."""

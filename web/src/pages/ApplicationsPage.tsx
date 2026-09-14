@@ -9,6 +9,7 @@ import {
   getDraftFiles,
   getDraftStatus,
   mergeDraft,
+  redraft,
   postPostingEvent,
   saveApplicationNotes,
   saveDraftFiles,
@@ -180,6 +181,29 @@ export default function ApplicationsPage() {
           startPolling(app.id, app.job_posting_id);
         } else if (result.status === "failed") {
           setActionError(result.error ?? "Draft generation failed");
+          setDraftingId(null);
+        }
+      })
+      .catch((err) => {
+        setActionError(err instanceof ApiError ? err.message : (err as Error).message);
+        setDraftingId(null);
+      });
+  };
+
+  const redraftApp = (app: Application) => {
+    setDraftingId(app.job_posting_id);
+    setActionError(null);
+    setApplications((prev) =>
+      prev.map((a) => (a.id === app.id ? { ...a, resume_draft_mr_url: null } : a)),
+    );
+    redraft(app.job_posting_id)
+      .then((result: DraftResult) => {
+        if (result.status === "complete") {
+          applyCompletedDraft(app.id, result);
+        } else if (result.status === "pending") {
+          startPolling(app.id, app.job_posting_id);
+        } else if (result.status === "failed") {
+          setActionError(result.error ?? "Re-draft failed");
           setDraftingId(null);
         }
       })
@@ -386,6 +410,17 @@ export default function ApplicationsPage() {
                             className="rounded-card border border-ok px-2 py-1 text-xs text-ok"
                           >
                             See Draft
+                          </button>
+                        ) : null}
+
+                        {app.status === "drafting" ? (
+                          <button
+                            type="button"
+                            disabled={draftingId === app.job_posting_id}
+                            onClick={() => redraftApp(app)}
+                            className="rounded-card border border-border-subtle px-2 py-1 text-xs disabled:opacity-40"
+                          >
+                            {draftingId === app.job_posting_id ? "Generating…" : "Re-draft"}
                           </button>
                         ) : null}
 
