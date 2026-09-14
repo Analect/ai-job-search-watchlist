@@ -16,6 +16,7 @@ No auth logic lives here — the platform gateway validates the caller's
 identity before any request reaches this Component.
 """
 
+import os
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -41,6 +42,22 @@ from pipelines.common.postings import (
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
 from api.drafting import DraftAlreadyMergedError, close_mr, generate_drafts, get_draft_files, merge_draft, update_draft_files
+
+# OTel tracing — only initialised when OTEL_EXPORTER_OTLP_ENDPOINT is set so
+# local dev without a collector doesn't spin up a background export thread.
+_OTEL_ENABLED = bool(os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"))
+if _OTEL_ENABLED:
+    from opentelemetry import trace as _otel_trace
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    _provider = TracerProvider(
+        resource=Resource({SERVICE_NAME: os.environ.get("OTEL_SERVICE_NAME", "job-search-api")})
+    )
+    _provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    _otel_trace.set_tracer_provider(_provider)
 
 
 @asynccontextmanager

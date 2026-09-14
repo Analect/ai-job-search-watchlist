@@ -139,20 +139,46 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
 }}"""
 
     client = _get_bedrock_client()
-    response = client.invoke_model(
-        modelId=_DRAFTING_MODEL_ID,
-        contentType="application/json",
-        accept="application/json",
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 8000,
-            "messages": [{"role": "user", "content": prompt}],
-        }),
-    )
-    body = json.loads(response["body"].read())
-    text = body["content"][0]["text"]
-    parsed = json.loads(text)
-    return parsed["resume"], parsed["cover_letter"]
+
+    try:
+        from opentelemetry import trace as _otel_trace
+        _tracer = _otel_trace.get_tracer("job-search-api.drafting")
+        _span_ctx = _tracer.start_as_current_span("bedrock.invoke_model")
+    except Exception:
+        _span_ctx = None
+
+    import contextlib
+    with (_span_ctx if _span_ctx is not None else contextlib.nullcontext()) as span:
+        if span is not None:
+            try:
+                span.set_attribute("gen_ai.system", "aws_bedrock")
+                span.set_attribute("gen_ai.request.model", _DRAFTING_MODEL_ID)
+            except Exception:
+                pass
+
+        response = client.invoke_model(
+            modelId=_DRAFTING_MODEL_ID,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 8000,
+                "messages": [{"role": "user", "content": prompt}],
+            }),
+        )
+        body = json.loads(response["body"].read())
+
+        if span is not None:
+            try:
+                usage = body.get("usage", {})
+                span.set_attribute("gen_ai.usage.input_tokens", usage.get("input_tokens", 0))
+                span.set_attribute("gen_ai.usage.output_tokens", usage.get("output_tokens", 0))
+            except Exception:
+                pass
+
+        text = body["content"][0]["text"]
+        parsed = json.loads(text)
+        return parsed["resume"], parsed["cover_letter"]
 
 
 def _create_branch(branch_name: str) -> None:
