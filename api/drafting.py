@@ -22,6 +22,7 @@ _GITLAB_API = "https://gitlab.analect.com/api/v4"
 _RESUME_PROJECT = "mccoole%2Fresume"  # URL-encoded project path
 _TYPST_TEMPLATES_PATH = "typst/templates"
 _PROFILE_DOCS = [
+    "system/candidate-profile.md",
     "system/why-what-how-system.md",
     "system/pillars-career-arc-system.md",
 ]
@@ -173,6 +174,17 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
                 usage = body.get("usage", {})
                 span.set_attribute("gen_ai.usage.input_tokens", usage.get("input_tokens", 0))
                 span.set_attribute("gen_ai.usage.output_tokens", usage.get("output_tokens", 0))
+            except Exception:
+                pass
+
+            try:
+                span.add_event("gen_ai.user.message", {"content": prompt})
+            except Exception:
+                pass
+
+            try:
+                completion_text = body.get("content", [{}])[0].get("text", "")
+                span.add_event("gen_ai.assistant.message", {"content": completion_text})
             except Exception:
                 pass
 
