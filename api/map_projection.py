@@ -60,7 +60,7 @@ def _compute_projection() -> list[dict]:
                 c.website
             from jseek_companies c
             join jseek_company_descriptions d on d.company_slug = c.slug and d.locale = 'en'
-            join jseek_industries i on i.id = c.industry_id
+            join jseek_industries i on i.id = c.industry_id::integer
             where i.name in ('Technology', 'Financial Services', 'Professional Services')
               and d.description is not null and d.description != ''
             """
