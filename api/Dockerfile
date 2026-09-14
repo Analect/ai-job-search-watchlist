@@ -4,7 +4,7 @@
 # layout reasoning as pipelines/Dockerfile.
 FROM ghcr.io/typst/typst:latest AS typst-bin
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
-COPY --from=typst-bin /usr/local/bin/typst /usr/local/bin/typst
+COPY --from=typst-bin /bin/typst /usr/local/bin/typst
 WORKDIR /app
 ENV UV_CACHE_DIR=/tmp/uv-cache
 ENV PYTHONUNBUFFERED=1
