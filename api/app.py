@@ -41,7 +41,7 @@ from pipelines.common.postings import (
 )
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
-from api.drafting import DraftAlreadyMergedError, close_mr, generate_drafts, get_draft_files, merge_draft, update_draft_files
+from api.drafting import DraftAlreadyMergedError, _delete_branch, close_mr, generate_drafts, get_draft_files, merge_draft, update_draft_files
 
 # OTel tracing — only initialised when OTEL_EXPORTER_OTLP_ENDPOINT is set so
 # local dev without a collector doesn't spin up a background export thread.
@@ -477,6 +477,13 @@ def post_redraft(
             close_mr(existing_mr_url)
         except requests.HTTPError:
             pass  # already closed/merged — proceed anyway
+
+    existing_branch = app_row.get("resume_draft_branch")
+    if existing_branch:
+        try:
+            _delete_branch(existing_branch)
+        except Exception:
+            pass  # best-effort; branch may not exist
 
     apps_module.set_draft_pending(job_posting_id)
     background_tasks.add_task(_run_generate_drafts, job_posting_id, detail)

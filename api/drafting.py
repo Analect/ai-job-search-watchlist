@@ -233,6 +233,19 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
         return parsed["resume"], parsed["cover_letter"], trace_id
 
 
+def _delete_branch(branch_name: str) -> None:
+    """Delete a branch from the resume repo; no-op if it doesn't exist."""
+    import urllib.parse
+    encoded = urllib.parse.quote(branch_name, safe="")
+    resp = requests.delete(
+        f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/branches/{encoded}",
+        headers=_gitlab_headers(),
+        timeout=10,
+    )
+    if resp.status_code not in (200, 204, 404):
+        resp.raise_for_status()
+
+
 def _create_branch(branch_name: str) -> None:
     resp = requests.post(
         f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/branches",
