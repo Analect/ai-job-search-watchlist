@@ -149,7 +149,7 @@ export default function EmployerMap({ companies, onCompaniesChange }: EmployerMa
                           cx={cx}
                           cy={cy}
                           r={isSelected ? 6 / Math.sqrt(zoom) : c.short_listed ? 5 / Math.sqrt(zoom) : 3 / Math.sqrt(zoom)}
-                          fill={c.short_listed ? "var(--accent)" : isMatch ? "orange" : "var(--muted)"}
+                          fill={c.short_listed ? "var(--accent)" : (isSelected || isMatch) ? "orange" : "var(--muted)"}
                           stroke={isSelected ? "white" : isMatch ? "orange" : c.short_listed ? "gold" : "none"}
                           strokeWidth={isSelected ? 2 / Math.sqrt(zoom) : isMatch ? 1.5 / Math.sqrt(zoom) : c.short_listed ? 1.5 / Math.sqrt(zoom) : 0}
                           opacity={hovered && hovered.slug !== c.slug && !isSelected ? 0.35 : 0.85}
