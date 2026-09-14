@@ -140,6 +140,7 @@ export default function ApplicationsPage() {
               resume_draft_mr_url: draft.resume_draft_mr_url ?? null,
               draft_generated_at: draft.draft_generated_at ?? null,
               draft_model_id: draft.draft_model_id ?? null,
+              draft_trace_id: draft.draft_trace_id ?? null,
               draft_error: null,
             }
           : a,

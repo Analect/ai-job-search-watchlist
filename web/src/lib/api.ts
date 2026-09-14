@@ -268,6 +268,7 @@ export interface DraftResult {
   cover_letter_draft_path?: string;
   draft_generated_at?: string;
   draft_model_id?: string | null;
+  draft_trace_id?: string | null;
   error?: string;
 }
 
