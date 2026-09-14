@@ -89,13 +89,19 @@ def boards_resource():
     write_disposition={"disposition": "merge", "strategy": "upsert"},
 )
 def descriptions_resource():
+    # CSV is wide-format: slug, en, de, fr, it — one column per locale.
+    # Only 'en' is consumed by map_projection.py; yield one row per company.
     rows = _fetch_csv("company_descriptions.csv")
     print(f"[jseek] {len(rows)} descriptions fetched", flush=True)
     for row in rows:
+        slug = row.get("slug")
+        description = row.get("en")
+        if not slug or not description:
+            continue
         yield {
-            "company_slug": row["company_slug"],
-            "locale": row.get("locale", "en"),
-            "description": row.get("description"),
+            "company_slug": slug,
+            "locale": "en",
+            "description": description,
         }
 
 
