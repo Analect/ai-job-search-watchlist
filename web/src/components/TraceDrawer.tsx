@@ -141,39 +141,47 @@ export function TraceDrawer({
   }
 
   return (
-    <aside className="flex w-80 flex-shrink-0 flex-col border-l border-border-subtle bg-surface">
-      <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted">LLM Trace</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 text-muted hover:bg-brand-soft"
-          aria-label="Close trace panel"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            aria-hidden="true"
-          >
-            <path d="M6 6l12 12M6 18L18 6" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-4">
-        {loading ? (
-          <p className="text-sm text-muted">Loading trace…</p>
-        ) : error ? (
-          <p className="text-sm text-danger">{error}</p>
-        ) : roots.length === 0 ? (
-          <p className="text-sm text-muted">No spans found.</p>
-        ) : (
-          <>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex h-[80vh] w-full max-w-3xl flex-col rounded-card border border-border-subtle bg-surface shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3">
+          <div className="min-w-0">
+            <span className="text-xs font-medium uppercase tracking-wide text-muted">LLM Trace</span>
             {traceId ? (
-              <p className="mb-3 break-all font-mono text-[10px] text-muted">{traceId}</p>
+              <p className="mt-0.5 break-all font-mono text-[10px] text-muted">{traceId}</p>
             ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ml-4 flex-shrink-0 rounded p-1 text-muted hover:bg-brand-soft"
+            aria-label="Close trace panel"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12M6 18L18 6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {loading ? (
+            <p className="text-sm text-muted">Loading trace…</p>
+          ) : error ? (
+            <p className="text-sm text-danger">{error}</p>
+          ) : roots.length === 0 ? (
+            <p className="text-sm text-muted">No spans found.</p>
+          ) : (
             <ul className="space-y-2">
               {roots.map((span) => (
                 <SpanNode
@@ -184,9 +192,9 @@ export function TraceDrawer({
                 />
               ))}
             </ul>
-          </>
-        )}
+          )}
+        </div>
       </div>
-    </aside>
+    </div>
   );
 }

@@ -351,8 +351,8 @@ export default function ApplicationsPage() {
   }
 
   return (
-    <div className="flex min-h-0 gap-4">
-      <div className="min-w-0 flex-1 space-y-3">
+    <div className="space-y-3">
+      <div>
       {actionError ? <p className="text-sm text-danger">{actionError}</p> : null}
 
       <div className="overflow-x-auto rounded-card border border-border-subtle bg-surface">
@@ -670,4 +670,5 @@ export default function ApplicationsPage() {
       ) : null}
     </div>
   );
+
 }
