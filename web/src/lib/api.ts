@@ -223,6 +223,27 @@ export interface Application {
   application_notes: string | null;
   draft_model_id: string | null;
   draft_error: string | null;
+  draft_trace_id: string | null;
+}
+
+export interface TraceSpan {
+  traceId: string;
+  spanId: string;
+  name: string;
+  startTimeUnixNano?: string | number;
+  durationNano?: string | number;
+  attributes?: Record<string, unknown>;
+  resource?: { "service.name"?: string; [key: string]: unknown };
+  [key: string]: unknown;
+}
+
+export interface TraceResult {
+  trace_id: string;
+  spans: TraceSpan[];
+}
+
+export function getApplicationTrace(job_posting_id: string): Promise<TraceResult> {
+  return request(`/applications/${job_posting_id}/trace`);
 }
 
 export function fetchApplications(): Promise<{ results: Application[] }> {

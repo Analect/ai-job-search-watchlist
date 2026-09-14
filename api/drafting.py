@@ -176,9 +176,18 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
             except Exception:
                 pass
 
+        trace_id = None
+        if span is not None:
+            try:
+                ctx = span.get_span_context()
+                if ctx.is_valid:
+                    trace_id = format(ctx.trace_id, "032x")
+            except Exception:
+                pass
+
         text = body["content"][0]["text"]
         parsed = json.loads(text)
-        return parsed["resume"], parsed["cover_letter"]
+        return parsed["resume"], parsed["cover_letter"], trace_id
 
 
 def _create_branch(branch_name: str) -> None:
@@ -339,7 +348,7 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     resume_tmpl = _fetch_template(f"{_TYPST_TEMPLATES_PATH}/resume-template.typ")
     letter_tmpl = _fetch_template(f"{_TYPST_TEMPLATES_PATH}/letter-template.typ")
 
-    resume_content, letter_content = _draft_with_llm(
+    resume_content, letter_content, trace_id = _draft_with_llm(
         description, resume_tmpl, letter_tmpl, application_notes=application_notes
     )
 
@@ -361,4 +370,5 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
         "cover_letter_draft_path": f"typst/{folder}/{letter_filename}",
         "draft_generated_at": now.isoformat(),
         "draft_model_id": _DRAFTING_MODEL_ID,
+        "draft_trace_id": trace_id,
     }

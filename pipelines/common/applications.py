@@ -141,7 +141,8 @@ def list_all() -> list[dict]:
                    jp.title, e.name as employer_name,
                    a.resume_draft_mr_url, a.draft_generated_at,
                    a.created_at, a.updated_at,
-                   a.application_notes, a.draft_model_id, a.draft_error
+                   a.application_notes, a.draft_model_id, a.draft_error,
+                   a.draft_trace_id
               from applications a
               join job_postings jp on jp.id = a.job_posting_id
               join employers e on e.id = jp.employer_id
@@ -161,6 +162,7 @@ def list_all() -> list[dict]:
             "application_notes": r[9],
             "draft_model_id": r[10],
             "draft_error": r[11],
+            "draft_trace_id": r[12],
         }
         for r in rows
     ]
@@ -223,6 +225,7 @@ def persist_draft_info(
     cover_letter_path: str,
     generated_at: str,
     model_id: str | None = None,
+    trace_id: str | None = None,
 ) -> dict:
     """Persist resume-draft metadata on the applications row after a
     successful generate-drafts call (T039). Also advances status to
@@ -239,6 +242,7 @@ def persist_draft_info(
                    cover_letter_draft_path = %s,
                    draft_generated_at      = %s,
                    draft_model_id          = %s,
+                   draft_trace_id          = %s,
                    draft_error             = null,
                    updated_at              = now()
              where job_posting_id = %s
@@ -247,7 +251,7 @@ def persist_draft_info(
                       cover_letter_draft_path, draft_generated_at,
                       created_at, updated_at
             """,
-            (branch, mr_url, resume_path, cover_letter_path, generated_at, model_id, pid),
+            (branch, mr_url, resume_path, cover_letter_path, generated_at, model_id, trace_id, pid),
         )
         row = cur.fetchone()
         if row is None:
@@ -281,6 +285,7 @@ def set_draft_pending(job_posting_id: UUID | str) -> dict | None:
                    cover_letter_draft_path = null,
                    draft_generated_at      = null,
                    draft_model_id          = null,
+                   draft_trace_id          = null,
                    draft_error             = null,
                    updated_at              = now()
              where job_posting_id = %s
@@ -330,7 +335,7 @@ def get_draft_status(job_posting_id: UUID | str) -> dict | None:
             """
             select status, resume_draft_branch, resume_draft_mr_url,
                    resume_draft_path, cover_letter_draft_path,
-                   draft_generated_at, draft_error
+                   draft_generated_at, draft_error, draft_model_id, draft_trace_id
               from applications
              where job_posting_id = %s
             """,
@@ -339,14 +344,8 @@ def get_draft_status(job_posting_id: UUID | str) -> dict | None:
         row = cur.fetchone()
     if row is None:
         return None
-    status, branch, mr_url, resume_path, cl_path, generated_at, draft_error = row
+    status, branch, mr_url, resume_path, cl_path, generated_at, draft_error, model_id, trace_id = row
     if status == "drafting" and mr_url is not None:
-        with get_connection() as conn2, conn2.cursor() as cur2:
-            cur2.execute(
-                "select draft_model_id from applications where job_posting_id = %s",
-                (pid,),
-            )
-            model_row = cur2.fetchone()
         return {
             "status": "complete",
             "resume_draft_branch": branch,
@@ -354,7 +353,8 @@ def get_draft_status(job_posting_id: UUID | str) -> dict | None:
             "resume_draft_path": resume_path,
             "cover_letter_draft_path": cl_path,
             "draft_generated_at": generated_at.isoformat() if generated_at else None,
-            "draft_model_id": model_row[0] if model_row else None,
+            "draft_model_id": model_id,
+            "draft_trace_id": trace_id,
         }
     if status == "drafting":
         return {"status": "pending"}
@@ -371,7 +371,7 @@ def get_draft_info(job_posting_id: UUID | str) -> dict | None:
             """
             select resume_draft_branch, resume_draft_mr_url,
                    resume_draft_path, cover_letter_draft_path,
-                   draft_generated_at, status
+                   draft_generated_at, status, draft_trace_id
               from applications
              where job_posting_id = %s
                and resume_draft_mr_url is not null
@@ -388,6 +388,7 @@ def get_draft_info(job_posting_id: UUID | str) -> dict | None:
         "cover_letter_draft_path": row[3],
         "draft_generated_at": row[4],
         "status": row[5],
+        "draft_trace_id": row[6],
     }
 
 

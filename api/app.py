@@ -353,6 +353,7 @@ def _run_generate_drafts(job_posting_id: UUID, detail: dict) -> None:
             cover_letter_path=draft["cover_letter_draft_path"],
             generated_at=draft["draft_generated_at"],
             model_id=draft.get("draft_model_id"),
+            trace_id=draft.get("draft_trace_id"),
         )
     except Exception as e:
         apps_module.set_draft_failed(job_posting_id, str(e))
@@ -364,6 +365,41 @@ def get_draft_status(job_posting_id: UUID) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail="no application found for this posting")
     return result
+
+
+@app.get("/applications/{job_posting_id}/trace")
+def get_application_trace(job_posting_id: UUID) -> dict:
+    """Return OTel spans for the LLM draft generation call from OpenSearch."""
+    draft = apps_module.get_draft_info(job_posting_id)
+    if draft is None or not draft.get("draft_trace_id"):
+        raise HTTPException(status_code=404, detail="no trace on record for this application")
+
+    trace_id = draft["draft_trace_id"]
+    os_url = os.environ.get("OPENSEARCH_URL", "").rstrip("/")
+    os_user = os.environ.get("OPENSEARCH_USERNAME", "")
+    os_pass = os.environ.get("OPENSEARCH_PASSWORD", "")
+    if not os_url:
+        raise HTTPException(status_code=503, detail="OpenSearch credentials not configured")
+
+    try:
+        resp = requests.post(
+            f"{os_url}/otel-traces-*/_search",
+            auth=(os_user, os_pass),
+            json={
+                "size": 50,
+                "query": {"term": {"traceId": trace_id}},
+                "_source": True,
+            },
+            timeout=10,
+            verify=False,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"OpenSearch error: {exc}")
+
+    hits = resp.json().get("hits", {}).get("hits", [])
+    spans = [h["_source"] for h in hits]
+    return {"trace_id": trace_id, "spans": spans}
 
 
 @app.get("/applications/{job_posting_id}/draft-files")

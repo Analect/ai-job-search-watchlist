@@ -6,6 +6,7 @@ import {
   fetchApplications,
   fetchPostingDetail,
   generateDrafts,
+  getApplicationTrace,
   getDraftFiles,
   getDraftStatus,
   mergeDraft,
@@ -16,7 +17,9 @@ import {
   type Application,
   type DraftFiles,
   type DraftResult,
+  type TraceSpan,
 } from "@/lib/api";
+import { TraceDrawer } from "@/components/TraceDrawer";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -60,6 +63,13 @@ export default function ApplicationsPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
   const saveNotesForId = useRef<string | null>(null);
+
+  // Trace panel
+  const [traceAppId, setTraceAppId] = useState<string | null>(null);
+  const [traceId, setTraceId] = useState<string | null>(null);
+  const [traceSpans, setTraceSpans] = useState<TraceSpan[] | null>(null);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
 
   // T058-T060: in-app draft viewer/editor
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
@@ -270,6 +280,34 @@ export default function ApplicationsPage() {
     setDraftFinalUrl(null);
   };
 
+  const openTrace = (app: Application, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (traceAppId === app.job_posting_id) {
+      setTraceAppId(null);
+      return;
+    }
+    setTraceAppId(app.job_posting_id);
+    setTraceId(app.draft_trace_id);
+    setTraceSpans(null);
+    setTraceError(null);
+    setTraceLoading(true);
+    getApplicationTrace(app.job_posting_id)
+      .then((result) => {
+        setTraceSpans(result.spans);
+        setTraceId(result.trace_id);
+      })
+      .catch((err) => {
+        setTraceError(err instanceof ApiError ? err.message : (err as Error).message);
+      })
+      .finally(() => setTraceLoading(false));
+  };
+
+  const closeTrace = () => {
+    setTraceAppId(null);
+    setTraceSpans(null);
+    setTraceError(null);
+  };
+
   const saveDraft = async (app: Application) => {
     if (!draftFiles) return;
     setDraftSaving(true);
@@ -312,7 +350,8 @@ export default function ApplicationsPage() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-0 gap-4">
+      <div className="min-w-0 flex-1 space-y-3">
       {actionError ? <p className="text-sm text-danger">{actionError}</p> : null}
 
       <div className="overflow-x-auto rounded-card border border-border-subtle bg-surface">
@@ -421,6 +460,16 @@ export default function ApplicationsPage() {
                             className="rounded-card border border-border-subtle px-2 py-1 text-xs disabled:opacity-40"
                           >
                             {draftingId === app.job_posting_id ? "Generating…" : "Re-draft"}
+                          </button>
+                        ) : null}
+
+                        {app.draft_trace_id ? (
+                          <button
+                            type="button"
+                            onClick={(e) => openTrace(app, e)}
+                            className={`rounded-card border px-2 py-1 text-xs ${traceAppId === app.job_posting_id ? "border-accent text-accent" : "border-border-subtle text-muted"}`}
+                          >
+                            {traceLoading && traceAppId === app.job_posting_id ? "Loading…" : "View Trace"}
                           </button>
                         ) : null}
 
@@ -607,6 +656,17 @@ export default function ApplicationsPage() {
           </tbody>
         </table>
       </div>
+      </div>
+
+      {traceAppId ? (
+        <TraceDrawer
+          traceId={traceId}
+          spans={traceSpans}
+          loading={traceLoading}
+          error={traceError}
+          onClose={closeTrace}
+        />
+      ) : null}
     </div>
   );
 }
