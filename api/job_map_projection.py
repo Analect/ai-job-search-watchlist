@@ -26,11 +26,11 @@ def _compute_job_projection() -> list[dict]:
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select jp.id, e.name, jp.title, jp.embedding
+            select jp.id, e.name, jp.title, jp.map_embedding
               from job_postings jp
               join employers e on e.id = jp.employer_id
              where jp.status = 'open'
-               and jp.embedding is not null
+               and jp.map_embedding is not null
             """
         )
         rows = cur.fetchall()

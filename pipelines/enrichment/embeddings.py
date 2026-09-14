@@ -51,6 +51,41 @@ def embed_text(text: str) -> list[float]:
     return body["embedding"]
 
 
+def embed_map_postings(job_posting_ids: list[str]) -> None:
+    """Compute and write map_embedding for the given posting ids using
+    title + key_terms as input — role-focused and employer-agnostic,
+    so the Job Watch Map UMAP projection clusters by role rather than
+    by employer. Falls back to title alone when key_terms is empty."""
+    if not job_posting_ids:
+        return
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select id, title, coalesce(key_terms, '{}')
+              from job_postings
+             where id = any(%s::uuid[])
+            """,
+            (job_posting_ids,),
+        )
+        rows = cur.fetchall()
+        for posting_id, title, key_terms in rows:
+            terms = [t for t in (key_terms or []) if t]
+            text = f"{title}. {', '.join(terms)}" if terms else title
+            if not text:
+                continue
+            try:
+                embedding = embed_text(text)
+            except Exception as exc:
+                print(f"[enrichment] {posting_id}: map_embedding failed - {exc}", flush=True)
+                continue
+            vector_literal = "[" + ",".join(repr(v) for v in embedding) + "]"
+            cur.execute(
+                "update job_postings set map_embedding = %s::vector where id = %s",
+                (vector_literal, str(posting_id)),
+            )
+        conn.commit()
+
+
 def embed_postings(job_posting_ids: list[str]) -> None:
     """Compute and write embeddings for the given posting ids, reading
     each posting's captured description text (falling back to title
