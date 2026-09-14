@@ -171,6 +171,8 @@ employers, locations, email, credentials)
   NEVER write `#show letter(` — that is invalid typst and will not compile.
 - Use `#exp(place, title, location, time, details)` for all experience/education entries.
 - Use `= Section Title` for section headings (single equals sign).
+- In the cover letter body, write plain prose only — NO `#link(...)`, NO `#exp(...)`,
+  NO inline typst function calls. Every `[` must have a matching `]`; every `(` a matching `)`.
 - Do NOT use any typst functions, imports, or constructs not shown in the examples above.
 
 Using the framing rules in the system prompt and ONLY the facts in the Candidate \
@@ -446,9 +448,15 @@ def generate_pdf(branch: str, draft_path: str) -> bytes:
         return files
 
     # draft_path is "typst/{folder}/{date}_mccoole_{type}.typ"
-    # Mirror under tmp/ so "../templates/" resolves relative to the draft file.
+    # Mirror the repo's typst/ subtree under tmp/typst/ so that:
+    #   - the draft lands at tmp/typst/{folder}/{date}.typ
+    #   - templates land at tmp/typst/templates/
+    #   - logos land at tmp/typst/logos/
+    # Passing --root tmp/typst allows "../templates/" (relative to the draft)
+    # to resolve without escaping the typst project sandbox.
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
+        typst_root = tmp / "typst"
 
         draft_file = tmp / draft_path
         draft_file.parent.mkdir(parents=True, exist_ok=True)
@@ -469,7 +477,7 @@ def generate_pdf(branch: str, draft_path: str) -> bytes:
 
         out_pdf = draft_file.with_suffix(".pdf")
         result = subprocess.run(
-            ["typst", "compile", str(draft_file), str(out_pdf)],
+            ["typst", "compile", "--root", str(typst_root), str(draft_file), str(out_pdf)],
             capture_output=True,
             timeout=60,
         )
