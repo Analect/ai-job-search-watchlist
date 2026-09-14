@@ -86,7 +86,7 @@ select
     true, true,
     coalesce(ats_type, '') in ({_AUTOMATED_IN})
 from matched
-on conflict (slug) do update set short_listed = true
+on conflict (slug) do update set short_listed = true, active = true
 returning collection_supported
 """
 
@@ -99,7 +99,7 @@ def remove_from_watchlist(slug: str) -> dict | None:
     """
     with get_connection() as conn, conn.cursor() as cur:
         cur.execute(
-            "update employers set short_listed = false where slug = %s returning slug",
+            "update employers set short_listed = false, active = false where slug = %s returning slug",
             (slug,),
         )
         row = cur.fetchone()
