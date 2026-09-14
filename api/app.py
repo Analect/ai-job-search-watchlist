@@ -23,7 +23,7 @@ from uuid import UUID
 import requests
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from api.job_map_projection import get_job_projection
@@ -41,7 +41,7 @@ from pipelines.common.postings import (
 )
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
-from api.drafting import DraftAlreadyMergedError, _delete_branch, close_mr, generate_drafts, get_draft_files, merge_draft, update_draft_files
+from api.drafting import DraftAlreadyMergedError, _delete_branch, close_mr, generate_drafts, generate_pdf, get_draft_files, merge_draft, update_draft_files
 
 # OTel tracing — only initialised when OTEL_EXPORTER_OTLP_ENDPOINT is set so
 # local dev without a collector doesn't spin up a background export thread.
@@ -415,6 +415,35 @@ def get_application_draft_files(job_posting_id: UUID) -> dict:
         )
     except requests.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"GitLab API error: {exc}")
+
+
+@app.get("/applications/{job_posting_id}/draft-pdf")
+def get_draft_pdf(
+    job_posting_id: UUID,
+    file: str = Query(default="resume", pattern="^(resume|cover_letter)$"),
+) -> Response:
+    draft = apps_module.get_draft_info(job_posting_id)
+    if draft is None or not draft.get("resume_draft_branch"):
+        raise HTTPException(status_code=404, detail="no draft on record for this application")
+
+    path_key = "resume_draft_path" if file == "resume" else "cover_letter_draft_path"
+    draft_path = draft.get(path_key)
+    if not draft_path:
+        raise HTTPException(status_code=404, detail="draft path not found")
+
+    try:
+        pdf_bytes = generate_pdf(draft["resume_draft_branch"], draft_path)
+    except requests.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"GitLab API error: {exc}")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    filename = "resume.pdf" if file == "resume" else "cover_letter.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 class DraftFilesBody(BaseModel):

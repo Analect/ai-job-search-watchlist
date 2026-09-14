@@ -8,6 +8,7 @@ import {
   generateDrafts,
   getApplicationTrace,
   getDraftFiles,
+  getDraftPdf,
   getDraftStatus,
   mergeDraft,
   redraft,
@@ -70,6 +71,9 @@ export default function ApplicationsPage() {
   const [traceSpans, setTraceSpans] = useState<TraceSpan[] | null>(null);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState<string | null>(null);
+
+  // PDF preview
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
 
   // T058-T060: in-app draft viewer/editor
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
@@ -309,6 +313,20 @@ export default function ApplicationsPage() {
     setTraceError(null);
   };
 
+  const previewPdf = async (app: Application, file: "resume" | "cover_letter", e: React.MouseEvent) => {
+    e.stopPropagation();
+    const key = `${app.job_posting_id}:${file}`;
+    setPdfLoadingId(key);
+    try {
+      const objectUrl = await getDraftPdf(app.job_posting_id, file);
+      window.open(objectUrl, "_blank", "noreferrer");
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : (err as Error).message);
+    } finally {
+      setPdfLoadingId(null);
+    }
+  };
+
   const saveDraft = async (app: Application) => {
     if (!draftFiles) return;
     setDraftSaving(true);
@@ -451,6 +469,27 @@ export default function ApplicationsPage() {
                           >
                             See Draft
                           </button>
+                        ) : null}
+
+                        {app.status === "drafting" && app.resume_draft_mr_url ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={pdfLoadingId === `${app.job_posting_id}:resume`}
+                              onClick={(e) => previewPdf(app, "resume", e)}
+                              className="rounded-card border border-border-subtle px-2 py-1 text-xs disabled:opacity-40"
+                            >
+                              {pdfLoadingId === `${app.job_posting_id}:resume` ? "Building…" : "Resume PDF"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pdfLoadingId === `${app.job_posting_id}:cover_letter`}
+                              onClick={(e) => previewPdf(app, "cover_letter", e)}
+                              className="rounded-card border border-border-subtle px-2 py-1 text-xs disabled:opacity-40"
+                            >
+                              {pdfLoadingId === `${app.job_posting_id}:cover_letter` ? "Building…" : "Letter PDF"}
+                            </button>
+                          </>
                         ) : null}
 
                         {app.status === "drafting" ? (

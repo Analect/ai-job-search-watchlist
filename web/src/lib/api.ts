@@ -304,6 +304,19 @@ export function saveDraftFiles(
   });
 }
 
+export async function getDraftPdf(
+  job_posting_id: string,
+  file: "resume" | "cover_letter",
+): Promise<string> {
+  const res = await fetch(`${API_BASE}/applications/${job_posting_id}/draft-pdf?file=${file}`);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new ApiError(res.status, body || res.statusText);
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export function mergeDraft(
   job_posting_id: string,
 ): Promise<{ status: string; final_url: string }> {

@@ -2,7 +2,9 @@
 # REPO ROOT (not this directory) — api/app.py imports pipelines.common.*
 # (postings.py, events.py, similarity.py, db.py), same shared-module
 # layout reasoning as pipelines/Dockerfile.
+FROM ghcr.io/typst/typst:latest AS typst-bin
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+COPY --from=typst-bin /usr/local/bin/typst /usr/local/bin/typst
 WORKDIR /app
 ENV UV_CACHE_DIR=/tmp/uv-cache
 ENV PYTHONUNBUFFERED=1

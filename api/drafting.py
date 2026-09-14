@@ -382,6 +382,87 @@ def merge_draft(mr_url: str) -> dict:
     return {"final_url": final_url}
 
 
+def generate_pdf(branch: str, draft_path: str) -> bytes:
+    """Compile a typst draft to PDF and return the raw bytes.
+
+    Fetches the draft .typ file from the MR branch and all assets under
+    typst/templates/ and typst/logos/ from main, mirrors the repo's typst/
+    subtree in a temp directory so relative imports resolve correctly, then
+    runs `typst compile`.
+    """
+    import subprocess
+    import tempfile
+    import urllib.parse
+    from pathlib import Path
+
+    headers = _gitlab_headers()
+
+    def _fetch_file(path: str, ref: str = "main") -> bytes:
+        encoded = urllib.parse.quote(path, safe="")
+        resp = requests.get(
+            f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/files/{encoded}/raw",
+            headers=headers,
+            params={"ref": ref},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.content
+
+    def _list_tree(path: str, ref: str = "main") -> list[str]:
+        files: list[str] = []
+        page = 1
+        while True:
+            resp = requests.get(
+                f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/tree",
+                headers=headers,
+                params={"path": path, "ref": ref, "recursive": True, "per_page": 100, "page": page},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            items = resp.json()
+            for item in items:
+                if item["type"] == "blob":
+                    files.append(item["path"])
+            if len(items) < 100:
+                break
+            page += 1
+        return files
+
+    # draft_path is "typst/{folder}/{date}_mccoole_{type}.typ"
+    # Mirror under tmp/ so "../templates/" resolves relative to the draft file.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+
+        draft_file = tmp / draft_path
+        draft_file.parent.mkdir(parents=True, exist_ok=True)
+        draft_file.write_bytes(_fetch_file(draft_path, ref=branch))
+
+        for asset_dir in ("typst/templates", "typst/logos"):
+            try:
+                asset_paths = _list_tree(asset_dir)
+            except Exception:
+                asset_paths = []
+            for asset_path in asset_paths:
+                try:
+                    dest = tmp / asset_path
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(_fetch_file(asset_path))
+                except Exception:
+                    pass
+
+        out_pdf = draft_file.with_suffix(".pdf")
+        result = subprocess.run(
+            ["typst", "compile", str(draft_file), str(out_pdf)],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")
+            raise RuntimeError(f"typst compile failed: {stderr}")
+
+        return out_pdf.read_bytes()
+
+
 def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     """Generate resume/cover-letter drafts for a posting and push to the
     resume repo as a reviewable MR.  Returns the draft metadata dict."""
