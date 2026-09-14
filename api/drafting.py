@@ -21,10 +21,20 @@ import requests
 _GITLAB_API = "https://gitlab.analect.com/api/v4"
 _RESUME_PROJECT = "mccoole%2Fresume"  # URL-encoded project path
 _TYPST_TEMPLATES_PATH = "typst/templates"
-_PROFILE_DOCS = [
-    "system/candidate-profile.md",
+
+# Docs sent as the Bedrock system prompt — written as LLM role instructions
+# ("You are a career-positioning assistant…").  They govern voice, framing
+# rules, pillar selection logic, and the Why/What/How structure.
+_SYSTEM_DOCS = [
     "system/why-what-how-system.md",
     "system/pillars-career-arc-system.md",
+]
+
+# Factual ground-truth document — authoritative for all dates, employers,
+# locations, email, credentials.  Sent in the user turn so the model treats
+# it as concrete input data rather than standing instruction.
+_FACTUAL_DOCS = [
+    "system/candidate-profile.md",
 ]
 
 # Cross-region inference profile ID. Must be one of the profiles covered by
@@ -72,19 +82,18 @@ def _slugify(text: str) -> str:
     return s.strip("-")[:40]
 
 
-def _fetch_profile_docs() -> list[tuple[str, str]]:
-    """Fetch candidate profile documents from the resume repo.
+def _fetch_docs(paths: list[str]) -> list[tuple[str, str]]:
+    """Fetch a list of documents from the resume repo.
 
-    Returns a list of (path, content) tuples. On individual fetch failure,
-    logs a warning and skips that document rather than aborting the draft.
+    Returns (path, content) tuples; skips with a warning on fetch failure.
     """
     results = []
-    for path in _PROFILE_DOCS:
+    for path in paths:
         try:
             content = _fetch_template(path)
             results.append((path, content))
         except Exception as exc:
-            print(f"[drafting] warning: could not fetch profile doc {path!r}: {exc}", flush=True)
+            print(f"[drafting] warning: could not fetch {path!r}: {exc}", flush=True)
     return results
 
 
@@ -96,27 +105,47 @@ def _draft_with_llm(
 ) -> tuple[str, str]:
     """Call Bedrock Claude to draft the resume and cover letter.
 
-    The prompt is grounded in the candidate's real profile documents
-    (fetched from mccoole/resume) rather than asking the LLM to fill a
-    blank template — this is the root-cause fix for fabricated claims in
-    prior drafts (research.md §6, spec.md US7).
+    System prompt: why-what-how + pillars framing docs (written as LLM role
+    instructions — "You are a career-positioning assistant…").
+
+    User message: factual candidate profile (authoritative for all dates,
+    employers, locations, email) + job description + templates + notes.
+    The anti-fabrication rule explicitly flags that the factual profile
+    supersedes any incidental references in the framing docs.
     """
-    profile_docs = _fetch_profile_docs()
-    profile_section = "\n\n".join(
-        f"## {path}\n{content}" for path, content in profile_docs
-    )
+    system_docs = _fetch_docs(_SYSTEM_DOCS)
+    factual_docs = _fetch_docs(_FACTUAL_DOCS)
+
+    # System prompt = framing/voice instructions (already written as system prompts)
+    system_prompt = "\n\n---\n\n".join(content for _, content in system_docs)
+    # Append a hard override so the model defers to candidate-profile for facts
+    system_prompt += """
+
+---
+
+## Hard factual override rule
+
+The framing documents above (Why/What/How, Pillars/Acts) contain illustrative \
+date ranges, location references, and achievement periods used as narrative anchors. \
+These are NOT authoritative CV data. For every factual claim in the output — \
+employer names, exact employment dates, location, email address, certifications \
+with expiry dates, education — use ONLY what is stated in the Candidate Profile \
+section of the user message. If the Candidate Profile and the framing documents \
+conflict on a fact, the Candidate Profile always wins. Do NOT invent or infer any \
+fact not present in the Candidate Profile."""
 
     notes_section = ""
     if application_notes and application_notes.strip():
-        notes_section = f"\n\n## Candidate guidance\n{application_notes.strip()}"
+        notes_section = f"\n\n## Candidate guidance (from application notes)\n{application_notes.strip()}"
 
-    prompt = f"""You are helping draft job-application materials for a specific candidate.
+    factual_section = "\n\n".join(
+        f"## {path}\n{content}" for path, content in factual_docs
+    )
 
-CRITICAL RULE: Every claim you make about the candidate — employers, dates, metrics, \
-credentials, skills — MUST be traceable to the candidate profile documents below. \
-Do NOT invent, infer, or embellish anything not explicitly stated there.
+    prompt = f"""## Candidate Profile (factual ground truth — authoritative for all dates, \
+employers, locations, email, credentials)
 
-{profile_section}{notes_section}
+{factual_section}{notes_section}
 
 ## Job description
 {description}
@@ -127,7 +156,8 @@ Do NOT invent, infer, or embellish anything not explicitly stated there.
 ## Cover letter structural template (typst — format reference only)
 {letter_tmpl}
 
-Using ONLY the facts in the candidate profile above, write:
+Using the framing rules in the system prompt and ONLY the facts in the Candidate \
+Profile above, write:
 1. A tailored resume (typst format, matching the template structure) \
 highlighting experience relevant to this job description.
 2. A cover letter (typst format) that is compelling, concise, and grounded \
@@ -164,6 +194,7 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 8000,
+                "system": system_prompt,
                 "messages": [{"role": "user", "content": prompt}],
             }),
         )
