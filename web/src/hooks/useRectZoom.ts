@@ -83,7 +83,6 @@ export function useRectZoom({
   );
 
   const onPointerDown = useCallback((e: React.PointerEvent<Element>) => {
-    (e.currentTarget as Element).setPointerCapture(e.pointerId);
     const mode: Mode = e.shiftKey ? "selecting" : "panning";
     // T019/T020: convert client coords to SVG-element-local coords at pointer-down.
     // This makes the selection rect and zoom computation share the same reference
