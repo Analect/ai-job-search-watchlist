@@ -22,6 +22,12 @@ _GITLAB_API = "https://gitlab.analect.com/api/v4"
 _RESUME_PROJECT = "mccoole%2Fresume"  # URL-encoded project path
 _TYPST_TEMPLATES_PATH = "typst/templates"
 
+# Reference examples of correctly-compiled typst files — passed as structural
+# templates rather than the raw template function definitions, which confuse
+# the model about call syntax (#show: cv.with( vs #show cv().
+_RESUME_EXAMPLE = "typst/20260602-william-hollis/20260602_mccoole_resume.typ"
+_LETTER_EXAMPLE = "typst/20260602-william-hollis/20260602_mccoole_letter.typ"
+
 # Docs sent as the Bedrock system prompt — written as LLM role instructions
 # ("You are a career-positioning assistant…").  They govern voice, framing
 # rules, pillar selection logic, and the Why/What/How structure.
@@ -150,15 +156,26 @@ employers, locations, email, credentials)
 ## Job description
 {description}
 
-## Resume structural template (typst — format reference only, not fill-in-the-blank)
+## Resume example (typst — real compiled file, use this exact call syntax and structure)
 {resume_tmpl}
 
-## Cover letter structural template (typst — format reference only)
+## Cover letter example (typst — real compiled file, use this exact call syntax and structure)
 {letter_tmpl}
+
+## Critical typst syntax rules — MUST follow exactly
+- The resume MUST start with: `#import "../templates/resume-template.typ": *`
+  then `#show: cv.with(` (note the colon after `show` and `.with(`).
+  NEVER write `#show cv(` — that is invalid typst and will not compile.
+- The cover letter MUST start with: `#import "../templates/letter-template.typ": *`
+  then `#show: letter.with(` (note the colon after `show` and `.with(`).
+  NEVER write `#show letter(` — that is invalid typst and will not compile.
+- Use `#exp(place, title, location, time, details)` for all experience/education entries.
+- Use `= Section Title` for section headings (single equals sign).
+- Do NOT use any typst functions, imports, or constructs not shown in the examples above.
 
 Using the framing rules in the system prompt and ONLY the facts in the Candidate \
 Profile above, write:
-1. A tailored resume (typst format, matching the template structure) \
+1. A tailored resume (typst format, following the example structure and syntax exactly) \
 highlighting experience relevant to this job description.
 2. A cover letter (typst format) that is compelling, concise, and grounded \
 in real experience from the profile.
@@ -482,8 +499,8 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     branch_name = f"{date_str}-{slug}"
     folder = branch_name
 
-    resume_tmpl = _fetch_template(f"{_TYPST_TEMPLATES_PATH}/resume-template.typ")
-    letter_tmpl = _fetch_template(f"{_TYPST_TEMPLATES_PATH}/letter-template.typ")
+    resume_tmpl = _fetch_template(_RESUME_EXAMPLE)
+    letter_tmpl = _fetch_template(_LETTER_EXAMPLE)
 
     resume_content, letter_content, trace_id = _draft_with_llm(
         description, resume_tmpl, letter_tmpl, application_notes=application_notes
