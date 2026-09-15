@@ -382,7 +382,13 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
             except Exception:
                 pass
 
-        text = body["content"][0]["text"]
+        stop_reason = body.get("stop_reason", "")
+        content_blocks = body.get("content", [])
+        text_blocks = [b.get("text") for b in content_blocks if b.get("type") == "text" and b.get("text")]
+        if not text_blocks:
+            print(f"[drafting] unexpected bedrock response — stop_reason={stop_reason!r} content={content_blocks!r}", flush=True)
+            raise RuntimeError(f"bedrock returned no text content (stop_reason={stop_reason!r})")
+        text = text_blocks[0]
         parsed = json.loads(text)
         return parsed["resume"], parsed["cover_letter"], trace_id, effective_model_id
 
@@ -593,7 +599,12 @@ def _fix_typst_compile_error(content: str, kind: str, error: str, model_id: str)
         }),
     )
     body = json.loads(response["body"].read())
-    return body["content"][0]["text"].strip()
+    content_blocks = body.get("content", [])
+    text_blocks = [b.get("text") for b in content_blocks if b.get("type") == "text" and b.get("text")]
+    if not text_blocks:
+        print(f"[drafting] fix-compile: unexpected bedrock response — stop_reason={body.get('stop_reason')!r} content={content_blocks!r}", flush=True)
+        return content  # return original unchanged if correction call fails
+    return text_blocks[0].strip()
 
 
 def generate_pdf(branch: str, draft_path: str) -> bytes:
