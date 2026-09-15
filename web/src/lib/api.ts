@@ -272,12 +272,22 @@ export interface DraftResult {
   error?: string;
 }
 
-export function generateDrafts(job_posting_id: string): Promise<DraftResult> {
-  return request(`/applications/${job_posting_id}/generate-drafts`, { method: "POST" });
+export function fetchDraftModels(): Promise<{ models: string[] }> {
+  return request(`/draft-models`);
 }
 
-export function redraft(job_posting_id: string): Promise<DraftResult> {
-  return request(`/applications/${job_posting_id}/redraft`, { method: "POST" });
+export function generateDrafts(job_posting_id: string, modelId?: string): Promise<DraftResult> {
+  return request(`/applications/${job_posting_id}/generate-drafts`, {
+    method: "POST",
+    body: modelId ? JSON.stringify({ model_id: modelId }) : undefined,
+  });
+}
+
+export function redraft(job_posting_id: string, modelId?: string): Promise<DraftResult> {
+  return request(`/applications/${job_posting_id}/redraft`, {
+    method: "POST",
+    body: modelId ? JSON.stringify({ model_id: modelId }) : undefined,
+  });
 }
 
 export function getDraftStatus(job_posting_id: string): Promise<DraftResult> {

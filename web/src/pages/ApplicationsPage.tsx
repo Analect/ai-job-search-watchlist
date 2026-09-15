@@ -4,6 +4,7 @@ import {
   ApiError,
   advanceApplicationStatus,
   fetchApplications,
+  fetchDraftModels,
   fetchPostingDetail,
   generateDrafts,
   getApplicationTrace,
@@ -75,6 +76,10 @@ export default function ApplicationsPage() {
   // PDF preview
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
 
+  // Model selection
+  const [draftModels, setDraftModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>("");
+
   // T058-T060: in-app draft viewer/editor
   const [draftPanelId, setDraftPanelId] = useState<string | null>(null);
   const [draftFiles, setDraftFiles] = useState<DraftFiles | null>(null);
@@ -103,6 +108,12 @@ export default function ApplicationsPage() {
       .then((res) => setApplications(res.results))
       .catch((err) => setError(err instanceof ApiError ? err.message : (err as Error).message))
       .finally(() => setLoading(false));
+    fetchDraftModels()
+      .then((res) => {
+        setDraftModels(res.models);
+        if (res.models.length > 0) setSelectedModel(res.models[0]);
+      })
+      .catch(() => {});
     return () => {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
@@ -188,7 +199,7 @@ export default function ApplicationsPage() {
   const generateDraft = (app: Application) => {
     setDraftingId(app.job_posting_id);
     setActionError(null);
-    generateDrafts(app.job_posting_id)
+    generateDrafts(app.job_posting_id, selectedModel || undefined)
       .then((result: DraftResult) => {
         if (result.status === "complete") {
           applyCompletedDraft(app.id, result);
@@ -211,7 +222,7 @@ export default function ApplicationsPage() {
     setApplications((prev) =>
       prev.map((a) => (a.id === app.id ? { ...a, resume_draft_mr_url: null } : a)),
     );
-    redraft(app.job_posting_id)
+    redraft(app.job_posting_id, selectedModel || undefined)
       .then((result: DraftResult) => {
         if (result.status === "complete") {
           applyCompletedDraft(app.id, result);
@@ -370,6 +381,22 @@ export default function ApplicationsPage() {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        {draftModels.length > 0 ? (
+          <>
+            <label className="text-xs text-muted shrink-0">Draft model:</label>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="rounded border border-border-subtle bg-surface px-2 py-1 text-xs"
+            >
+              {draftModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </>
+        ) : null}
+      </div>
       <div>
       {actionError ? <p className="text-sm text-danger">{actionError}</p> : null}
 

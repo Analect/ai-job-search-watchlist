@@ -41,7 +41,7 @@ from pipelines.common.postings import (
 )
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
-from api.drafting import DraftAlreadyMergedError, _delete_branch, close_mr, generate_drafts, generate_pdf, get_draft_files, merge_draft, update_draft_files
+from api.drafting import AVAILABLE_DRAFT_MODELS, DraftAlreadyMergedError, _delete_branch, close_mr, generate_drafts, generate_pdf, get_draft_files, merge_draft, update_draft_files
 
 # OTel tracing — only initialised when OTEL_EXPORTER_OTLP_ENDPOINT is set so
 # local dev without a collector doesn't spin up a background export thread.
@@ -88,6 +88,15 @@ class ApplicationStatusRequest(BaseModel):
 
 class ApplicationNotesRequest(BaseModel):
     notes: str | None = None
+
+
+class GenerateDraftsRequest(BaseModel):
+    model_id: str | None = None
+
+
+@app.get("/draft-models")
+def get_draft_models() -> dict:
+    return {"models": AVAILABLE_DRAFT_MODELS}
 
 
 @app.get("/healthz")
@@ -306,7 +315,8 @@ def post_application_status(job_posting_id: UUID, body: ApplicationStatusRequest
 
 @app.post("/applications/{job_posting_id}/generate-drafts")
 def post_generate_drafts(
-    job_posting_id: UUID, background_tasks: BackgroundTasks
+    job_posting_id: UUID, background_tasks: BackgroundTasks,
+    body: GenerateDraftsRequest = GenerateDraftsRequest(),
 ) -> JSONResponse:
     # Idempotent: return complete state if draft already exists.
     existing = apps_module.get_draft_info(job_posting_id)
@@ -338,13 +348,13 @@ def post_generate_drafts(
         )
 
     apps_module.set_draft_pending(job_posting_id)
-    background_tasks.add_task(_run_generate_drafts, job_posting_id, detail)
+    background_tasks.add_task(_run_generate_drafts, job_posting_id, detail, body.model_id)
     return JSONResponse(status_code=202, content={"status": "pending"})
 
 
-def _run_generate_drafts(job_posting_id: UUID, detail: dict) -> None:
+def _run_generate_drafts(job_posting_id: UUID, detail: dict, model_id: str | None = None) -> None:
     try:
-        draft = generate_drafts(job_posting_id, detail)
+        draft = generate_drafts(job_posting_id, detail, model_id=model_id)
         apps_module.persist_draft_info(
             job_posting_id,
             branch=draft["resume_draft_branch"],
@@ -485,7 +495,8 @@ def post_draft_merge(job_posting_id: UUID) -> dict:
 
 @app.post("/applications/{job_posting_id}/redraft")
 def post_redraft(
-    job_posting_id: UUID, background_tasks: BackgroundTasks
+    job_posting_id: UUID, background_tasks: BackgroundTasks,
+    body: GenerateDraftsRequest = GenerateDraftsRequest(),
 ) -> JSONResponse:
     app_row = apps_module.get(job_posting_id)
     if app_row is None:
@@ -515,5 +526,5 @@ def post_redraft(
             pass  # best-effort; branch may not exist
 
     apps_module.set_draft_pending(job_posting_id)
-    background_tasks.add_task(_run_generate_drafts, job_posting_id, detail)
+    background_tasks.add_task(_run_generate_drafts, job_posting_id, detail, body.model_id)
     return JSONResponse(status_code=202, content={"status": "pending"})

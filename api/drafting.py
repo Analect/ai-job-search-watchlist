@@ -133,6 +133,13 @@ _DRAFTING_MODEL_ID = os.environ.get(
 
 _bedrock_client = None
 
+# Available models for the draft generation drop-down. The default is set by
+# _DRAFTING_MODEL_ID; callers may pass any of these IDs to override per-request.
+AVAILABLE_DRAFT_MODELS = [
+    "us.anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-sonnet-5",
+]
+
 
 def _get_bedrock_client():
     global _bedrock_client
@@ -146,19 +153,60 @@ def _gitlab_headers() -> dict:
     return {"PRIVATE-TOKEN": token, "Content-Type": "application/json"}
 
 
-def _fetch_template(path: str) -> str:
-    headers = _gitlab_headers()
+def _fetch_repo_file(path: str, ref: str = "main") -> bytes:
     import urllib.parse
-
     encoded = urllib.parse.quote(path, safe="")
     resp = requests.get(
         f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/files/{encoded}/raw",
-        headers=headers,
-        params={"ref": "main"},
-        timeout=10,
+        headers=_gitlab_headers(),
+        params={"ref": ref},
+        timeout=15,
     )
     resp.raise_for_status()
-    return resp.text
+    return resp.content
+
+
+def _list_repo_tree(path: str, ref: str = "main") -> list[str]:
+    files: list[str] = []
+    page = 1
+    while True:
+        resp = requests.get(
+            f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/tree",
+            headers=_gitlab_headers(),
+            params={"path": path, "ref": ref, "recursive": True, "per_page": 100, "page": page},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        items = resp.json()
+        for item in items:
+            if item["type"] == "blob":
+                files.append(item["path"])
+        if len(items) < 100:
+            break
+        page += 1
+    return files
+
+
+def _fetch_typst_assets(tmp: "Path") -> None:
+    """Fetch typst/templates and typst/logos from main into tmp/, mirroring
+    the repo path so ../templates/ imports resolve from any typst/{folder}/."""
+    from pathlib import Path as _Path
+    for asset_dir in ("typst/templates", "typst/logos"):
+        try:
+            asset_paths = _list_repo_tree(asset_dir)
+        except Exception:
+            asset_paths = []
+        for asset_path in asset_paths:
+            try:
+                dest = tmp / asset_path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(_fetch_repo_file(asset_path))
+            except Exception:
+                pass
+
+
+def _fetch_template(path: str) -> str:
+    return _fetch_repo_file(path).decode()
 
 
 def _slugify(text: str) -> str:
@@ -188,6 +236,7 @@ def _draft_with_llm(
     resume_tmpl: str,
     letter_tmpl: str,
     application_notes: str | None = None,
+    model_id: str | None = None,
 ) -> tuple[str, str]:
     """Call Bedrock Claude to draft the resume and cover letter.
 
@@ -268,6 +317,7 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
   "cover_letter": "<complete typst cover letter>"
 }}"""
 
+    effective_model_id = model_id if model_id else _DRAFTING_MODEL_ID
     client = _get_bedrock_client()
 
     try:
@@ -282,12 +332,12 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
         if span is not None:
             try:
                 span.set_attribute("gen_ai.system", "aws_bedrock")
-                span.set_attribute("gen_ai.request.model", _DRAFTING_MODEL_ID)
+                span.set_attribute("gen_ai.request.model", effective_model_id)
             except Exception:
                 pass
 
         response = client.invoke_model(
-            modelId=_DRAFTING_MODEL_ID,
+            modelId=effective_model_id,
             contentType="application/json",
             accept="application/json",
             body=json.dumps({
@@ -329,7 +379,7 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
 
         text = body["content"][0]["text"]
         parsed = json.loads(text)
-        return parsed["resume"], parsed["cover_letter"], trace_id
+        return parsed["resume"], parsed["cover_letter"], trace_id, effective_model_id
 
 
 def _delete_branch(branch_name: str) -> None:
@@ -481,6 +531,66 @@ def merge_draft(mr_url: str) -> dict:
     return {"final_url": final_url}
 
 
+def _compile_typst_content(content: str, kind: str) -> tuple[bool, str]:
+    """Write typst content to a temp dir, fetch assets, run typst compile.
+
+    Returns (success, stderr). On success stderr is empty; on failure it
+    contains the compiler error text.
+    """
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        typst_root = tmp / "typst"
+        draft_file = typst_root / "validate" / f"{kind}.typ"
+        draft_file.parent.mkdir(parents=True, exist_ok=True)
+        draft_file.write_text(content, encoding="utf-8")
+
+        _fetch_typst_assets(tmp)
+
+        out_pdf = draft_file.with_suffix(".pdf")
+        result = subprocess.run(
+            ["typst", "compile", "--root", str(typst_root), str(draft_file), str(out_pdf)],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            return True, ""
+        return False, result.stderr.decode(errors="replace")
+
+
+def _fix_typst_compile_error(content: str, kind: str, error: str, model_id: str) -> str:
+    """Send a targeted correction request to the model for a compile failure.
+
+    Returns the corrected typst (best-effort — the caller should try to
+    compile the result and handle a second failure gracefully).
+    """
+    print(f"[drafting] typst {kind} compile error — requesting correction from {model_id}", flush=True)
+    client = _get_bedrock_client()
+    fix_prompt = (
+        f"The following typst {kind} failed to compile with this error:\n\n"
+        f"{error}\n\n"
+        f"Here is the full typst content that failed:\n\n"
+        f"{content}\n\n"
+        "Return ONLY the corrected typst. No JSON wrapper, no markdown fences, "
+        "no explanation — just the corrected typst file content."
+    )
+    response = client.invoke_model(
+        modelId=model_id,
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps({
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 8000,
+            "messages": [{"role": "user", "content": fix_prompt}],
+        }),
+    )
+    body = json.loads(response["body"].read())
+    return body["content"][0]["text"].strip()
+
+
 def generate_pdf(branch: str, draft_path: str) -> bytes:
     """Compile a typst draft to PDF and return the raw bytes.
 
@@ -491,69 +601,17 @@ def generate_pdf(branch: str, draft_path: str) -> bytes:
     """
     import subprocess
     import tempfile
-    import urllib.parse
     from pathlib import Path
 
-    headers = _gitlab_headers()
-
-    def _fetch_file(path: str, ref: str = "main") -> bytes:
-        encoded = urllib.parse.quote(path, safe="")
-        resp = requests.get(
-            f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/files/{encoded}/raw",
-            headers=headers,
-            params={"ref": ref},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        return resp.content
-
-    def _list_tree(path: str, ref: str = "main") -> list[str]:
-        files: list[str] = []
-        page = 1
-        while True:
-            resp = requests.get(
-                f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/tree",
-                headers=headers,
-                params={"path": path, "ref": ref, "recursive": True, "per_page": 100, "page": page},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            items = resp.json()
-            for item in items:
-                if item["type"] == "blob":
-                    files.append(item["path"])
-            if len(items) < 100:
-                break
-            page += 1
-        return files
-
-    # draft_path is "typst/{folder}/{date}_mccoole_{type}.typ"
-    # Mirror the repo's typst/ subtree under tmp/typst/ so that:
-    #   - the draft lands at tmp/typst/{folder}/{date}.typ
-    #   - templates land at tmp/typst/templates/
-    #   - logos land at tmp/typst/logos/
-    # Passing --root tmp/typst allows "../templates/" (relative to the draft)
-    # to resolve without escaping the typst project sandbox.
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         typst_root = tmp / "typst"
 
         draft_file = tmp / draft_path
         draft_file.parent.mkdir(parents=True, exist_ok=True)
-        draft_file.write_bytes(_fetch_file(draft_path, ref=branch))
+        draft_file.write_bytes(_fetch_repo_file(draft_path, ref=branch))
 
-        for asset_dir in ("typst/templates", "typst/logos"):
-            try:
-                asset_paths = _list_tree(asset_dir)
-            except Exception:
-                asset_paths = []
-            for asset_path in asset_paths:
-                try:
-                    dest = tmp / asset_path
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(_fetch_file(asset_path))
-                except Exception:
-                    pass
+        _fetch_typst_assets(tmp)
 
         out_pdf = draft_file.with_suffix(".pdf")
         result = subprocess.run(
@@ -568,7 +626,7 @@ def generate_pdf(branch: str, draft_path: str) -> bytes:
         return out_pdf.read_bytes()
 
 
-def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
+def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | None = None) -> dict:
     """Generate resume/cover-letter drafts for a posting and push to the
     resume repo as a reviewable MR.  Returns the draft metadata dict."""
     from pipelines.common.applications import get as _get_application
@@ -590,9 +648,22 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     branch_name = f"{datetime_str}-{slug}"
     folder = branch_name
 
-    resume_content, letter_content, trace_id = _draft_with_llm(
-        description, _RESUME_SKELETON, _LETTER_SKELETON, application_notes=application_notes
+    resume_content, letter_content, trace_id, effective_model_id = _draft_with_llm(
+        description, _RESUME_SKELETON, _LETTER_SKELETON,
+        application_notes=application_notes, model_id=model_id,
     )
+
+    # Compile-and-fix: attempt typst compile for each file; on error send a
+    # targeted correction request to the model before committing.
+    for kind, content_ref in [("resume", "resume_content"), ("cover_letter", "letter_content")]:
+        content = resume_content if kind == "resume" else letter_content
+        ok, error = _compile_typst_content(content, kind)
+        if not ok:
+            corrected = _fix_typst_compile_error(content, kind, error, effective_model_id)
+            if kind == "resume":
+                resume_content = corrected
+            else:
+                letter_content = corrected
 
     resume_filename = f"{date_str}_mccoole_resume.typ"
     letter_filename = f"{date_str}_mccoole_letter.typ"
@@ -611,6 +682,6 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
         "resume_draft_path": f"typst/{folder}/{resume_filename}",
         "cover_letter_draft_path": f"typst/{folder}/{letter_filename}",
         "draft_generated_at": now.isoformat(),
-        "draft_model_id": _DRAFTING_MODEL_ID,
+        "draft_model_id": effective_model_id,
         "draft_trace_id": trace_id,
     }
