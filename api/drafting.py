@@ -144,7 +144,12 @@ AVAILABLE_DRAFT_MODELS = [
 def _get_bedrock_client():
     global _bedrock_client
     if _bedrock_client is None:
-        _bedrock_client = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        from botocore.config import Config
+        _bedrock_client = boto3.client(
+            "bedrock-runtime",
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
+            config=Config(read_timeout=300, connect_timeout=10),
+        )
     return _bedrock_client
 
 
