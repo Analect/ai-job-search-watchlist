@@ -389,7 +389,12 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
             print(f"[drafting] unexpected bedrock response — stop_reason={stop_reason!r} content={content_blocks!r}", flush=True)
             raise RuntimeError(f"bedrock returned no text content (stop_reason={stop_reason!r})")
         text = text_blocks[0]
-        parsed = json.loads(text)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as exc:
+            print(f"[drafting] JSON parse error from {effective_model_id}: {exc}", flush=True)
+            print(f"[drafting] raw response (first 500 chars): {text[:500]!r}", flush=True)
+            raise
         return parsed["resume"], parsed["cover_letter"], trace_id, effective_model_id
 
 
