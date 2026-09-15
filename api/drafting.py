@@ -316,11 +316,10 @@ highlighting experience relevant to this job description.
 2. A cover letter (typst format) that is compelling, concise, and grounded \
 in real experience from the profile.
 
-Respond with EXACTLY the following JSON structure (no markdown fences, no preamble):
-{{
-  "resume": "<complete typst resume>",
-  "cover_letter": "<complete typst cover letter>"
-}}"""
+Output the resume first, then exactly this delimiter on its own line:
+===COVER_LETTER===
+Then output the cover letter. No markdown fences, no preamble, no explanation — \
+just the two typst files separated by that delimiter."""
 
     effective_model_id = model_id if model_id else _DRAFTING_MODEL_ID
     client = _get_bedrock_client()
@@ -347,7 +346,7 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
             accept="application/json",
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 8000,
+                "max_tokens": 16000,
                 "system": system_prompt,
                 "messages": [{"role": "user", "content": prompt}],
             }),
@@ -389,13 +388,13 @@ Respond with EXACTLY the following JSON structure (no markdown fences, no preamb
             print(f"[drafting] unexpected bedrock response — stop_reason={stop_reason!r} content={content_blocks!r}", flush=True)
             raise RuntimeError(f"bedrock returned no text content (stop_reason={stop_reason!r})")
         text = text_blocks[0]
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
-            print(f"[drafting] JSON parse error from {effective_model_id}: {exc}", flush=True)
+        _DELIM = "===COVER_LETTER==="
+        if _DELIM not in text:
+            print(f"[drafting] delimiter not found in response from {effective_model_id} — stop_reason={stop_reason!r}", flush=True)
             print(f"[drafting] raw response (first 500 chars): {text[:500]!r}", flush=True)
-            raise
-        return parsed["resume"], parsed["cover_letter"], trace_id, effective_model_id
+            raise RuntimeError(f"model response missing delimiter '{_DELIM}'")
+        resume_content, cover_letter_content = text.split(_DELIM, 1)
+        return resume_content.strip(), cover_letter_content.strip(), trace_id, effective_model_id
 
 
 def _delete_branch(branch_name: str) -> None:
