@@ -22,11 +22,91 @@ _GITLAB_API = "https://gitlab.analect.com/api/v4"
 _RESUME_PROJECT = "mccoole%2Fresume"  # URL-encoded project path
 _TYPST_TEMPLATES_PATH = "typst/templates"
 
-# Reference examples of correctly-compiled typst files — passed as structural
-# templates rather than the raw template function definitions, which confuse
-# the model about call syntax (#show: cv.with( vs #show cv().
-_RESUME_EXAMPLE = "typst/20260602-william-hollis/20260602_mccoole_resume.typ"
-_LETTER_EXAMPLE = "typst/20260602-william-hollis/20260602_mccoole_letter.typ"
+# Skeleton templates — exact typst call syntax with content placeholders.
+# Hardcoded rather than fetched so (a) no example content bleeds into model
+# output, (b) we fully control problematic patterns (email escaping, no #link
+# in letter body). The \@ escape is required: bare @word in a typst content
+# block is a citation reference.
+_RESUME_SKELETON = r"""#import "../templates/resume-template.typ": *
+
+#show: cv.with(
+  author: "Colum McCoole",
+  contacts: (
+    [#icon("../logos/home.svg") #link("https://analect.com/posts/")[Blog]],
+    [#icon("../logos/mail.svg") #link("mailto:colum.mccoole@analect.com")],
+    [#icon("../logos/mobile.png") #link("+353864491990")],
+    [#icon("../logos/github.svg") #link("https://github.com/Analect")[Analect]],
+    [#icon("../logos/linkedin.svg") #link("https://www.linkedin.com/in/colum-mccoole-746b946a/")[colum-mccoole-746b946a]],
+  )
+)
+
+= Brief
+[2–3 sentence positioning statement tailored to this specific role and employer.
+Focus on the most relevant experience thread from the candidate profile.]
+
+= Experience
+#exp(
+  "Employer Name",
+  "Job Title",
+  "City, Country",
+  "Year – Year",
+  [
+    - [Achievement or responsibility bullet point]
+    - [Another bullet point]
+  ]
+)
+
+= Education
+#exp(
+  "Institution Name",
+  "Degree / Qualification",
+  "City, Country",
+  "Year",
+  []
+)
+
+= Certifications
+#exp(
+  "Issuing body",
+  [#link("https://credly.com/...")[Certification name]],
+  "Expiry: Month Year",
+  "Year",
+  ""
+)
+
+= Technical Skills
+- *Category*: item, item, item
+"""
+
+_LETTER_SKELETON = r"""#import "../templates/letter-template.typ": *
+
+#show: letter.with(
+  sender: [
+    Colum McCoole \
+    [City, Country — from candidate-profile.md contact location] \
+    colum.mccoole\@analect.com \
+    [phone]
+  ],
+  recipient: [
+    [Hiring Manager Name or "The Hiring Team"] \
+    [Employer Name] \
+    [City, Country]
+  ],
+  date: [[Date — e.g. 15 September 2026]],
+  subject: [Re: [Job Title] — [Employer Name]],
+  name: [Colum McCoole],
+)
+
+[Opening paragraph: genuine interest in this specific role at this employer. 1–3 sentences.]
+
+[Body paragraph: direct line from most relevant experience to what this role needs.
+Specific employers and achievements from the candidate profile. Plain prose only — no typst
+function calls, no #link(), no #exp().]
+
+[Body paragraph: second distinct angle if relevant, or merge with above. Plain prose only.]
+
+[Closing paragraph: brief call to action. Plain prose only.]
+"""
 
 # Docs sent as the Bedrock system prompt — written as LLM role instructions
 # ("You are a career-positioning assistant…").  They govern voice, framing
@@ -156,10 +236,10 @@ employers, locations, email, credentials)
 ## Job description
 {description}
 
-## Resume example (typst — real compiled file, use this exact call syntax and structure)
+## Resume skeleton (typst — use this exact call syntax and structure; replace placeholders with real content)
 {resume_tmpl}
 
-## Cover letter example (typst — real compiled file, use this exact call syntax and structure)
+## Cover letter skeleton (typst — use this exact call syntax and structure; replace placeholders with real content)
 {letter_tmpl}
 
 ## Critical typst syntax rules — MUST follow exactly
@@ -510,11 +590,8 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict) -> dict:
     branch_name = f"{datetime_str}-{slug}"
     folder = branch_name
 
-    resume_tmpl = _fetch_template(_RESUME_EXAMPLE)
-    letter_tmpl = _fetch_template(_LETTER_EXAMPLE)
-
     resume_content, letter_content, trace_id = _draft_with_llm(
-        description, resume_tmpl, letter_tmpl, application_notes=application_notes
+        description, _RESUME_SKELETON, _LETTER_SKELETON, application_notes=application_notes
     )
 
     resume_filename = f"{date_str}_mccoole_resume.typ"
