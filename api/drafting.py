@@ -367,8 +367,13 @@ just the two typst files separated by that delimiter."""
                 pass
 
             try:
-                completion_text = body.get("content", [{}])[0].get("text", "")
-                span.add_event("gen_ai.assistant.message", {"content": completion_text})
+                _blocks = body.get("content", [])
+                completion_text = next(
+                    (b.get("text", "") for b in _blocks if b.get("type") == "text"),
+                    "",
+                )
+                if completion_text:
+                    span.add_event("gen_ai.assistant.message", {"content": completion_text})
             except Exception:
                 pass
 
