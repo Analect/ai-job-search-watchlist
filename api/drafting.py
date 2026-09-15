@@ -97,15 +97,17 @@ _LETTER_SKELETON = r"""#import "../templates/letter-template.typ": *
   name: [Colum McCoole],
 )
 
-[Opening paragraph: genuine interest in this specific role at this employer. 1–3 sentences.]
+[Opening paragraph: genuine interest in this specific role at this employer. 2–3 sentences maximum.]
 
 [Body paragraph: direct line from most relevant experience to what this role needs.
-Specific employers and achievements from the candidate profile. Plain prose only — no typst
-function calls, no #link(), no #exp().]
+Specific employers and achievements from the candidate profile. 3–4 sentences maximum.
+Plain prose only — no typst function calls, no #link(), no #exp().]
 
-[Body paragraph: second distinct angle if relevant, or merge with above. Plain prose only.]
+[Body paragraph: second distinct angle if relevant — keep to 3–4 sentences. Plain prose only.]
 
-[Closing paragraph: brief call to action. Plain prose only.]
+[Closing paragraph: brief call to action. 1–2 sentences. Plain prose only.]
+
+#letterSignature("../logos/mccoole_signature.png")
 """
 
 # Docs sent as the Bedrock system prompt — written as LLM role instructions
@@ -307,6 +309,10 @@ employers, locations, email, credentials)
 - Use `= Section Title` for section headings (single equals sign).
 - In the cover letter body, write plain prose only — NO `#link(...)`, NO `#exp(...)`,
   NO inline typst function calls. Every `[` must have a matching `]`; every `(` a matching `)`.
+- Cover letter paragraphs MUST be SHORT: 2–3 sentences for the opening and closing,
+  3–4 sentences maximum for body paragraphs. Do NOT write long dense paragraphs.
+- The cover letter skeleton ends with `#letterSignature("../logos/mccoole_signature.png")` —
+  preserve this line exactly as written.
 - Do NOT use any typst functions, imports, or constructs not shown in the examples above.
 
 Using the framing rules in the system prompt and ONLY the facts in the Candidate \
