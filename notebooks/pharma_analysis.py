@@ -30,6 +30,16 @@ def _():
 
 @app.cell(hide_code=True)
 def _():
+    import sys
+    from pathlib import Path
+
+    # When running in marimohub the project root (parent of notebooks/) is not
+    # on sys.path because package=false skips the editable install. Add it so
+    # that `import pipelines` resolves to the directory in the synced archive.
+    _root = str(Path(__file__).parent.parent)
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+
     import pandas as pd
 
     from pipelines.common.db import get_connection
