@@ -65,20 +65,36 @@ wrong env vars) to be used.
 The current pinned release is `marimohub-auth-poweruser-d4dfb677c` (2026-09-16),
 which includes all current parameters (`https://`, `controller-default`, secrets, etc.).
 
-### This should be automated
+### Automated: CI job in openchoreo-flux-state
 
-Manually running promote and committing the binding every time a Resource changes
-defeats the point of GitOps. The right fix is a CI job on `openchoreo-flux-state`
-that:
+The `promote-marimohub-poweruser` job in
+`openchoreo-flux-state/.gitlab-ci.yml` handles this automatically.
 
-1. Detects a change to `marimohub-auth-poweruser.yaml` on main
-2. Runs `occ resource promote marimohub-auth-poweruser --env development --namespace analect`
-3. Reads the new ResourceRelease name from the cluster
-4. Patches `resource-release-bindings/marimohub-auth-poweruser-development.yaml`
-5. Auto-commits back to main
+**Trigger**: any push to `main` where
+`namespaces/analect/projects/marimohub/resources/marimohub-auth-poweruser.yaml`
+changed (GitLab `changes:` path filter).
 
-This keeps Git as the audit trail while removing the manual step entirely.
-This CI job has not been written yet.
+**What it does**:
+1. Downloads `occ` v1.2.1
+2. Decodes `KUBECONFIG_OC_PLATFORM` (base64 CI variable) to authenticate to the cluster
+3. Sleeps 90s to give Flux time to reconcile the updated Resource spec
+4. Runs `occ resource promote marimohub-auth-poweruser --env development --namespace analect`
+5. Reads `spec.resourceRelease` from the cluster's `marimohub-auth-poweruser-development` ResourceReleaseBinding
+6. Patches `resource-release-bindings/marimohub-auth-poweruser-development.yaml` in the working tree
+7. Commits and pushes to `main` with `[skip ci]`
+
+The auto-commit only touches the binding file, which is NOT in the
+`changes:` filter, so the job does not re-trigger itself.
+
+**Prerequisites** (one-time setup in GitLab project settings):
+- `KUBECONFIG_OC_PLATFORM` CI/CD variable (protected, masked) — base64-encoded kubeconfig
+  scoped to a service account with get/list/patch on ResourceRelease and
+  ResourceReleaseBinding in the `analect` namespace
+- **Settings → CI/CD → General pipelines → "Allow Git push from CI jobs"** must be enabled
+
+From this point, changing any parameter in `marimohub-auth-poweruser.yaml`
+and merging to `main` is the only step needed — the CI job handles promote
+and git commit automatically.
 
 ## marimo-browser (KasmVNC) resources
 
