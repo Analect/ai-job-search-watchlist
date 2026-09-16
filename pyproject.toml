@@ -8,21 +8,29 @@ version = "0.1.0"
 description = "Personal job-search watchlist platform: per-ATS ingest pipelines, a postings/review web app, and an MCP server, deployed on OpenChoreo."
 requires-python = ">=3.12"
 dependencies = [
-    "dlt[postgres]>=1.0",
     "psycopg2-binary>=2.9",
-    "requests>=2.31",
-    "mcp>=2.0",  # mcp_server/server.py uses mcp.server.mcpserver.MCPServer (2.x; FastMCP was renamed from 1.x)
-    "marimo>=0.23.2",
     "pandas>=2.2",
-    "scikit-learn>=1.5",
-    "scipy>=1.11",
-    "umap-learn>=0.5",
-    "boto3>=1.34",
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
+# Heavy ML deps — not installed in marimohub sandbox, install locally with: uv sync --extra ml
+ml = [
+    "scikit-learn>=1.5",
+    "scipy>=1.11",
+    "umap-learn>=0.5",
+]
+# Data pipeline deps — DLT, AWS; install locally with: uv sync --extra pipelines
+pipelines = [
+    "dlt[postgres]>=1.0",
+    "boto3>=1.34",
+]
+# API server + MCP server
+server = [
+    "mcp>=2.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",

@@ -1,0 +1,5 @@
+# Exclude from git archive (sent to marimohub via CI push-sync).
+# uv.lock stays committed for local reproducibility but the marimohub
+# sandbox runs uv sync --inexact against pyproject.toml directly — a
+# lockfile would force it to reproduce the full platform-specific env.
+uv.lock export-ignore
