@@ -11,7 +11,7 @@ sync-marimohub:
     # Shallow clone (GIT_DEPTH: 1 below) keeps the .git dir within the
     # 100 MB decompressed limit.  .venv, __pycache__, node_modules are
     # excluded by .gitignore and not present in a fresh CI checkout.
-    - tar czf /tmp/sync.tgz .
+    - tar czf /tmp/sync.tgz --transform='s|^\./||' .
     - |
       curl --fail-with-body -X POST "$MARIMOHUB_SYNC_URL" \
         -H "Authorization: Bearer $MARIMOHUB_SYNC_TOKEN" \
