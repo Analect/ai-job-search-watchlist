@@ -111,30 +111,60 @@ check fires before any cell executes and shows the "Missing packages" dialog.
 Even if that dialog is dismissed, cell execution order in marimo means the
 sys.path cell may not run before the import cell.
 
+### Notes from marimohub API docs (`docs/syncing.md`)
+
+The docs state:
+
+> If the synced root contains `pyproject.toml`, `uv sync --inexact` adds its
+> dependencies to the base environment. **If this command fails, the session
+> continues with the base environment.**
+
+This means `uv sync` failure via `pyproject.toml` is documented as **non-fatal**.
+Yet marimohub is surfacing "Failed to prepare the notebook Python environment:
+uv exited unsuccessfully" as a fatal blocking error. The syncing docs are
+explicitly flagged as "work in progress, no backwards-compatibility guarantee",
+so this may reflect a behaviour change not yet reflected in the docs. Worth
+raising with marimohub.
+
 ### Options not yet tried
 
-1. **`PYTHONPATH` env var on the marimohub project/notebook** — if marimohub
-   lets you set environment variables at project level, setting
-   `PYTHONPATH=/workspace` (or wherever the archive root lands) would make
-   `import pipelines` work without any pyproject changes. Worth checking the
-   marimohub project settings UI.
+1. **Inspect the actual uv error** — `kubectl exec` into the sandbox pod and
+   run `uv sync --inexact` manually to see the real error. The marimohub UI
+   only surfaces the exit code. The actual failure reason (Python version
+   mismatch, hatchling build failure, network restriction, etc.) would be
+   definitive and point to the right fix.
 
-2. **A `.pth` file in site-packages** — a one-liner file placed in
-   `site-packages/` at sandbox startup would add the project root permanently.
-   Cannot be done from the archive directly; would need a marimohub hook or
-   init script.
-
-3. **Switch build backend to `setuptools`** — setuptools is more likely to be
+2. **Switch build backend to `setuptools`** — setuptools is more likely to be
    pre-installed in the sandbox than hatchling. Replace `[build-system]` with
    `requires = ["setuptools>=61"]` / `build-backend = "setuptools.build_meta"`
-   and add `[tool.setuptools.packages.find]`. May unblock the `package = true`
-   path if hatchling is the actual uv failure cause.
+   and add `[tool.setuptools.packages.find]`. May unblock `package = true`
+   if hatchling availability is the actual cause.
 
-4. **Inspect the actual uv error** — the marimohub sandbox pod logs (or a
-   `kubectl exec` into the sandbox pod) would show the real uv output. With
-   that, the root cause of the wheel-build failure would be definitive.
+3. **`PYTHONPATH` env var** — if marimohub exposes environment variable
+   injection at the project or notebook level, setting
+   `PYTHONPATH=/workspace` (or wherever the archive root is extracted) would
+   make `import pipelines` work without any wheel build. Worth checking the
+   marimohub project settings UI.
 
-5. **Publish `pipelines` to a private PyPI registry** — if the internal
-   GitLab Package Registry or a Gitea/Nexus PyPI index is available, publish
-   `pipelines` there and add it as a normal versioned dependency. Cleanest
-   long-term solution; avoids all editable-install complexity.
+4. **Publish `pipelines` to a private PyPI registry** — publish to the GitLab
+   Package Registry PyPI index and add it as a normal versioned dep. Cleanest
+   long-term solution; removes all editable-install complexity entirely.
+
+## Multiple notebooks
+
+There is no project-level sync endpoint. Each notebook in marimohub has its
+own sync URL and token. To sync multiple notebooks from the same CI job, POST
+the same archive to each sync URL:
+
+```yaml
+script:
+  - git archive --format=tar.gz -o /tmp/sync.tgz HEAD
+  - |
+    for URL in $MARIMOHUB_SYNC_URL_PHARMA $MARIMOHUB_SYNC_URL_QUERIES; do
+      curl --fail-with-body -X POST "$URL" ...
+    done
+```
+
+At scale, storing N tokens as GitLab CI variables is unwieldy. The better
+pattern is to store all tokens in Vault under one path as a JSON object (e.g.
+`secret/marimohub/sync-tokens`) and have CI fetch them once and loop.
