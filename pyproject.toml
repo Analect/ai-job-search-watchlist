@@ -39,13 +39,6 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["api", "pipelines", "mcp_server"]
 
-[tool.uv]
-# Do not install this project as a package during uv sync.
-# Prevents uv from trying to build a wheel (which requires hatchling and
-# network access) in the marimohub sandbox. The pipelines package is
-# importable directly because marimohub adds the project root to sys.path.
-package = false
-
 [tool.ruff]
 line-length = 100
 target-version = "py312"
