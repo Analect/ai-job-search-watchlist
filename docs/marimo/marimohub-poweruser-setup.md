@@ -190,3 +190,60 @@ identifying websites.
 
 This survives the KasmVNC session but is lost when the marimo-browser pod
 restarts.
+
+## Setting up KUBECONFIG_OC_PLATFORM for CI
+
+`KUBECONFIG_OC_PLATFORM` is a GitLab CI/CD variable holding a base64-encoded
+kubeconfig. Set it once in **Settings → CI/CD → Variables** (type: Variable,
+protected: yes, masked: yes).
+
+### Quick option: use the existing admin kubeconfig
+
+```bash
+base64 -w 0 /home/mccoole/.kube/config-oc-platform
+```
+
+Copy the output as the variable value. This works immediately but grants full
+cluster admin access to CI jobs.
+
+### Proper option: scoped service account (recommended)
+
+Creates a service account with only the permissions `occ resource promote`
+needs — read/create/patch on OpenChoreo resource types in the `analect`
+namespace.
+
+```bash
+export KUBECONFIG=/home/mccoole/.kube/config-oc-platform
+
+# Service account + RBAC
+kubectl create serviceaccount occ-ci-promote -n analect
+kubectl create role occ-ci-promote -n analect \
+  --verb=get,list,create,update,patch \
+  --resource=resources.openchoreo.dev,resourcereleases.openchoreo.dev,resourcereleasebindings.openchoreo.dev
+kubectl create rolebinding occ-ci-promote -n analect \
+  --role=occ-ci-promote --serviceaccount=analect:occ-ci-promote
+
+# Long-lived token (10 years — rotate if compromised)
+kubectl create token occ-ci-promote -n analect --duration=87600h > /tmp/occ-ci-token.txt
+
+# Build a minimal kubeconfig for that token
+SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+CA=$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}')
+TOKEN=$(cat /tmp/occ-ci-token.txt)
+
+kubectl config set-cluster oc-platform --server="$SERVER" \
+  --certificate-authority-data="$CA" --kubeconfig=/tmp/occ-ci-promote.kubeconfig
+kubectl config set-credentials occ-ci-promote --token="$TOKEN" \
+  --kubeconfig=/tmp/occ-ci-promote.kubeconfig
+kubectl config set-context default --cluster=oc-platform \
+  --user=occ-ci-promote --kubeconfig=/tmp/occ-ci-promote.kubeconfig
+kubectl config use-context default --kubeconfig=/tmp/occ-ci-promote.kubeconfig
+
+# Encode for GitLab
+base64 -w 0 /tmp/occ-ci-promote.kubeconfig
+
+# Clean up the token file
+rm /tmp/occ-ci-token.txt
+```
+
+Copy the final output as the variable value.
