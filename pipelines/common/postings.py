@@ -170,6 +170,7 @@ def search_jobs(
     location: str | None = None,
     company: str | None = None,
     status: str | None = "open",
+    industry: str | None = None,
     limit: int = 20,
 ) -> dict:
     """mcp-server-tools.contract.md's search_jobs — a distinct shape
@@ -183,6 +184,7 @@ def search_jobs(
         "location": location,
         "company": company,
         "status": status,
+        "industry": industry,
         "limit": limit,
     }
     with get_connection() as conn, conn.cursor() as cur:
@@ -226,6 +228,7 @@ def search_jobs(
                   or e.name ilike '%%' || %(company)s || '%%'
                   or e.slug ilike '%%' || %(company)s || '%%'
               )
+              and (%(industry)s is null or e.industry ilike '%%' || %(industry)s || '%%')
             order by jp.posted_date desc nulls last, jp.id
             limit %(limit)s
             """,
@@ -248,6 +251,39 @@ def search_jobs(
     ]
     if not results:
         return {"results": [], "message": "no postings matched"}
+    return {"results": results}
+
+
+def list_watchlist(industry: str | None = None) -> dict:
+    """Return employers currently on the watchlist (short_listed=true),
+    optionally filtered by industry substring (case-insensitive).
+    Useful for querying sector-specific watchlist membership without
+    going through the map, which is restricted to three display industries."""
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            select slug, name, industry, employee_count_range, ats_type, website
+              from employers
+             where short_listed = true
+               and (%(industry)s is null or industry ilike '%%' || %(industry)s || '%%')
+             order by name
+            """,
+            {"industry": industry},
+        )
+        rows = cur.fetchall()
+    results = [
+        {
+            "slug": r[0],
+            "name": r[1],
+            "industry": r[2],
+            "employee_count_range": r[3],
+            "ats_type": r[4],
+            "website": r[5],
+        }
+        for r in rows
+    ]
+    if not results:
+        return {"results": [], "message": "no watchlist employers matched"}
     return {"results": results}
 
 

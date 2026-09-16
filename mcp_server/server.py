@@ -28,6 +28,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from pipelines.common.events import mark_for_advancement as _mark_for_advancement
 from pipelines.common.postings import get_job_detail as _get_job_detail
+from pipelines.common.postings import list_watchlist as _list_watchlist
 from pipelines.common.postings import search_jobs as _search_jobs
 from pipelines.common.similarity import find_similar as _find_similar
 
@@ -40,15 +41,30 @@ def search_jobs(
     location: str | None = None,
     company: str | None = None,
     status: str | None = "open",
+    industry: str | None = None,
     limit: int = 20,
 ) -> dict:
     """Search current watchlist postings by free text, location
-    (london/dublin/other), employer name, and status (defaults to
-    open). Returns an explicit message when nothing matched, never a
-    bare empty list."""
+    (london/dublin/other), employer name, industry substring, and
+    status (defaults to open). Industry matching is case-insensitive
+    substring — pass 'pharma', 'biotech', 'technology', etc.
+    Returns an explicit message when nothing matched, never a bare
+    empty list."""
     return _search_jobs(
-        query=query, location=location, company=company, status=status, limit=limit
+        query=query, location=location, company=company, status=status,
+        industry=industry, limit=limit,
     )
+
+
+@mcp.tool()
+def list_watchlist(industry: str | None = None) -> dict:
+    """List all companies currently on the watchlist, optionally
+    filtered by industry substring (case-insensitive). Pass
+    industry='pharma' or industry='biotech' to narrow to
+    Pharmaceuticals & Biotech; omit to get every watched company.
+    Returns slug, name, industry, employee_count_range, ats_type,
+    and website for each match."""
+    return _list_watchlist(industry=industry)
 
 
 @mcp.tool()
