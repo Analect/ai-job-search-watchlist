@@ -16,6 +16,9 @@ web/tsconfig*.tsbuildinfo
 .env
 .env.local
 
+# marimo session state (runtime artifacts, not notebook source)
+notebooks/__marimo__/
+
 # OS / editor
 .DS_Store
 Thumbs.db
