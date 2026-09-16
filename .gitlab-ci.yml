@@ -5,13 +5,12 @@ sync-marimohub:
   before_script:
     - apk add --no-cache curl tar gzip git
   script:
-    # Archive the full checkout including .git so marimohub can:
-    #   a) run uv sync --inexact from pyproject.toml (installs pipelines.common)
-    #   b) capture multi-file edits when publishing back from a session
-    # Shallow clone (GIT_DEPTH: 1 below) keeps the .git dir within the
-    # 100 MB decompressed limit.  .venv, __pycache__, node_modules are
-    # excluded by .gitignore and not present in a fresh CI checkout.
-    - tar czf /tmp/sync.tgz --transform='s|^\./||' .
+    # git archive produces a clean tar without ./ prefixes or .git dir.
+    # pyproject.toml is included so marimohub runs uv sync --inexact at
+    # session start, which installs pipelines.common. Multi-file session
+    # publishing is not available without .git; add a separate step later
+    # if write-back beyond the entry notebook is needed.
+    - git archive --format=tar.gz -o /tmp/sync.tgz HEAD
     - |
       curl --fail-with-body -X POST "$MARIMOHUB_SYNC_URL" \
         -H "Authorization: Bearer $MARIMOHUB_SYNC_TOKEN" \
