@@ -366,6 +366,7 @@ def _run_generate_drafts(job_posting_id: UUID, detail: dict, model_id: str | Non
             generated_at=draft["draft_generated_at"],
             model_id=draft.get("draft_model_id"),
             trace_id=draft.get("draft_trace_id"),
+            draft_trace=draft.get("draft_trace"),
         )
     except Exception as e:
         apps_module.set_draft_failed(job_posting_id, str(e))
@@ -381,17 +382,54 @@ def get_draft_status(job_posting_id: UUID) -> dict:
 
 @app.get("/applications/{job_posting_id}/trace")
 def get_application_trace(job_posting_id: UUID) -> dict:
-    """Return OTel spans for the LLM draft generation call from OpenSearch."""
+    """Return LLM trace for the draft generation call.
+
+    Reads from the locally stored draft_trace jsonb first (durable, always
+    available).  Falls back to OpenSearch for older drafts that pre-date
+    local storage.
+    """
     draft = apps_module.get_draft_info(job_posting_id)
-    if draft is None or not draft.get("draft_trace_id"):
+    if draft is None:
+        raise HTTPException(status_code=404, detail="no application found for this posting")
+
+    trace_id = draft.get("draft_trace_id") or "local"
+
+    # --- local trace (preferred) ---
+    local_trace = draft.get("draft_trace")
+    if isinstance(local_trace, dict):
+        duration_ns = (local_trace.get("duration_ms") or 0) * 1_000_000
+        span = {
+            "name": "bedrock.invoke_model",
+            "spanId": "local-0001",
+            "traceId": trace_id,
+            "durationNano": duration_ns,
+            "attributes": {
+                "gen_ai.system": "aws_bedrock",
+                "gen_ai.request.model": local_trace.get("model", ""),
+                "gen_ai.usage.input_tokens": local_trace.get("input_tokens"),
+                "gen_ai.usage.output_tokens": local_trace.get("output_tokens"),
+            },
+            "events": [],
+        }
+        if local_trace.get("prompt"):
+            span["events"].append(
+                {"name": "gen_ai.user.message", "attributes": {"content": local_trace["prompt"]}}
+            )
+        if local_trace.get("raw_response"):
+            span["events"].append(
+                {"name": "gen_ai.assistant.message", "attributes": {"content": local_trace["raw_response"]}}
+            )
+        return {"trace_id": trace_id, "spans": [span]}
+
+    # --- OpenSearch fallback for pre-migration drafts ---
+    if not draft.get("draft_trace_id"):
         raise HTTPException(status_code=404, detail="no trace on record for this application")
 
-    trace_id = draft["draft_trace_id"]
     os_url = os.environ.get("OPENSEARCH_URL", "").rstrip("/")
     os_user = os.environ.get("OPENSEARCH_USERNAME", "")
     os_pass = os.environ.get("OPENSEARCH_PASSWORD", "")
     if not os_url:
-        raise HTTPException(status_code=503, detail="OpenSearch credentials not configured")
+        raise HTTPException(status_code=503, detail="OpenSearch not configured and no local trace available")
 
     try:
         resp = requests.post(

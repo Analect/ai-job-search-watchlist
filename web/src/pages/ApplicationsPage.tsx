@@ -589,7 +589,7 @@ export default function ApplicationsPage() {
                           </button>
                         ) : null}
 
-                        {app.draft_trace_id ? (
+                        {app.resume_draft_mr_url ? (
                           <button
                             type="button"
                             onClick={(e) => openTrace(app, e)}

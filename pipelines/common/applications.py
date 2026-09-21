@@ -5,6 +5,7 @@ by the GET /applications + status-advance + generate-drafts routes
 (T035/T036/T039).  Never called directly by pipelines.
 """
 
+import json
 from uuid import UUID
 
 from pipelines.common.db import get_connection
@@ -226,6 +227,7 @@ def persist_draft_info(
     generated_at: str,
     model_id: str | None = None,
     trace_id: str | None = None,
+    draft_trace: dict | None = None,
 ) -> dict:
     """Persist resume-draft metadata on the applications row after a
     successful generate-drafts call (T039). Also advances status to
@@ -243,6 +245,7 @@ def persist_draft_info(
                    draft_generated_at      = %s,
                    draft_model_id          = %s,
                    draft_trace_id          = %s,
+                   draft_trace             = %s::jsonb,
                    draft_error             = null,
                    updated_at              = now()
              where job_posting_id = %s
@@ -251,7 +254,8 @@ def persist_draft_info(
                       cover_letter_draft_path, draft_generated_at,
                       created_at, updated_at
             """,
-            (branch, mr_url, resume_path, cover_letter_path, generated_at, model_id, trace_id, pid),
+            (branch, mr_url, resume_path, cover_letter_path, generated_at, model_id, trace_id,
+             json.dumps(draft_trace) if draft_trace else None, pid),
         )
         row = cur.fetchone()
         if row is None:
@@ -371,7 +375,7 @@ def get_draft_info(job_posting_id: UUID | str) -> dict | None:
             """
             select resume_draft_branch, resume_draft_mr_url,
                    resume_draft_path, cover_letter_draft_path,
-                   draft_generated_at, status, draft_trace_id
+                   draft_generated_at, status, draft_trace_id, draft_trace
               from applications
              where job_posting_id = %s
                and resume_draft_mr_url is not null
@@ -389,6 +393,7 @@ def get_draft_info(job_posting_id: UUID | str) -> dict | None:
         "draft_generated_at": row[4],
         "status": row[5],
         "draft_trace_id": row[6],
+        "draft_trace": row[7],
     }
 
 

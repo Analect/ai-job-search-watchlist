@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from math import sqrt
 from pathlib import Path
 from datetime import datetime, timezone
@@ -312,6 +313,25 @@ def _rank_projects(
     return [(path, content) for _, path, content in scored[:top_k]]
 
 
+def _build_intelligence_text(job_intelligence: dict, title: str = "") -> str:
+    """Build a dense, boilerplate-free text from extracted job intelligence.
+
+    Used to produce a focused embedding for project ranking — more accurate
+    than embedding the full job description which contains salary copy,
+    benefits boilerplate, and generic HR language.
+    """
+    parts = []
+    if title:
+        parts.append(title)
+    if job_intelligence.get("key_terms"):
+        parts.append("Technologies: " + ", ".join(job_intelligence["key_terms"]))
+    if job_intelligence.get("responsibilities"):
+        parts.append("Responsibilities: " + ". ".join(job_intelligence["responsibilities"]))
+    if job_intelligence.get("requirements"):
+        parts.append("Requirements: " + ". ".join(job_intelligence["requirements"]))
+    return "\n".join(parts)
+
+
 def _fetch_project_files() -> list[tuple[str, str]]:
     """Fetch all *.md files under projects/ in the resume repo.
 
@@ -473,6 +493,7 @@ just the two typst files separated by that delimiter."""
         _span_ctx = None
 
     import contextlib
+    t0 = time.perf_counter()
     with (_span_ctx if _span_ctx is not None else contextlib.nullcontext()) as span:
         if span is not None:
             try:
@@ -493,10 +514,11 @@ just the two typst files separated by that delimiter."""
             }),
         )
         body = json.loads(response["body"].read())
+        duration_ms = int((time.perf_counter() - t0) * 1000)
 
+        usage = body.get("usage", {})
         if span is not None:
             try:
-                usage = body.get("usage", {})
                 span.set_attribute("gen_ai.usage.input_tokens", usage.get("input_tokens", 0))
                 span.set_attribute("gen_ai.usage.output_tokens", usage.get("output_tokens", 0))
             except Exception:
@@ -540,7 +562,16 @@ just the two typst files separated by that delimiter."""
             print(f"[drafting] raw response (first 500 chars): {text[:500]!r}", flush=True)
             raise RuntimeError(f"model response missing delimiter '{_DELIM}'")
         resume_content, cover_letter_content = text.split(_DELIM, 1)
-        return resume_content.strip(), cover_letter_content.strip(), trace_id, effective_model_id
+
+        trace_payload = {
+            "model": effective_model_id,
+            "input_tokens": usage.get("input_tokens"),
+            "output_tokens": usage.get("output_tokens"),
+            "duration_ms": duration_ms,
+            "prompt": prompt,
+            "raw_response": text,
+        }
+        return resume_content.strip(), cover_letter_content.strip(), trace_id, effective_model_id, trace_payload
 
 
 def _delete_branch(branch_name: str) -> None:
@@ -863,9 +894,6 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
     folder = branch_name
 
     project_files = _fetch_project_files()
-    posting_embedding = _fetch_posting_embedding(job_posting_id)
-    top_k = int(os.environ.get("DRAFT_TOP_K_PROJECTS", "3"))
-    ranked_projects = _rank_projects(project_files, posting_embedding, top_k=top_k)
 
     # Use pre-extracted job intelligence if available (written by enrich_promoted
     # when the posting was promoted). Falls back gracefully to None.
@@ -874,7 +902,22 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
     if isinstance(raw_enrichment, dict) and raw_enrichment.get("v") == 1:
         job_intelligence = raw_enrichment
 
-    resume_content, letter_content, trace_id, effective_model_id = _draft_with_llm(
+    # For project ranking, prefer an embedding of the extracted intelligence
+    # (dense, boilerplate-free) over the stored full-description embedding.
+    # Falls back to the stored embedding when enrichment is not available.
+    top_k = int(os.environ.get("DRAFT_TOP_K_PROJECTS", "3"))
+    if job_intelligence:
+        intel_text = _build_intelligence_text(job_intelligence, title=posting.get("title", ""))
+        try:
+            ranking_embedding = _embed_project(intel_text)
+        except Exception as exc:
+            print(f"[drafting] warning: could not embed intelligence text, falling back to posting embedding: {exc}", flush=True)
+            ranking_embedding = _fetch_posting_embedding(job_posting_id)
+    else:
+        ranking_embedding = _fetch_posting_embedding(job_posting_id)
+    ranked_projects = _rank_projects(project_files, ranking_embedding, top_k=top_k)
+
+    resume_content, letter_content, trace_id, effective_model_id, trace_payload = _draft_with_llm(
         description, _RESUME_SKELETON, _LETTER_SKELETON,
         application_notes=application_notes, model_id=model_id,
         project_files=ranked_projects or None,
@@ -918,4 +961,5 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
         "draft_generated_at": now.isoformat(),
         "draft_model_id": effective_model_id,
         "draft_trace_id": trace_id,
+        "draft_trace": trace_payload,
     }
