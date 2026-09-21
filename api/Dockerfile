@@ -19,6 +19,7 @@ RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "opentelemetry-sdk>=1.25" \
     "opentelemetry-exporter-otlp-proto-http>=1.25"
 COPY pipelines/common/ pipelines/common/
+COPY pipelines/enrichment/ pipelines/enrichment/
 COPY pipelines/__init__.py pipelines/__init__.py
 COPY api/ api/
 RUN python -c "import api.app"
