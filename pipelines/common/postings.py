@@ -62,6 +62,7 @@ _FILTERS_SQL = """
         )
     )
     and (%(company)s is null or e.slug = %(company)s)
+    and (%(source_url)s is null or jp.source_url = %(source_url)s)
 """
 
 
@@ -71,6 +72,7 @@ def list_postings(
     review_state: str | None = None,
     query: str | None = None,
     company: str | None = None,
+    source_url: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
@@ -80,6 +82,7 @@ def list_postings(
         "review_state": review_state,
         "query": query,
         "company": company,
+        "source_url": source_url,
         "limit": limit,
         "offset": offset,
     }

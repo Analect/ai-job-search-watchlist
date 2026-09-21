@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""jsw — job-search-watchlist command-line client.
+
+Requires JSW_API_URL pointing at the job-search-api base URL, e.g.:
+  export JSW_API_URL=https://job-search-api.gateway.example.com
+
+Or port-forward first:
+  kubectl port-forward -n <ns> svc/job-search-api-development 8080:8080
+  export JSW_API_URL=http://localhost:8080
+
+Usage
+-----
+  jsw list [--location london|dublin|other] [--status open|closed]
+           [--state unreviewed|reviewed|flagged|promoted|thumbs_up|thumbs_down]
+           [--company SLUG] [--query TEXT] [--limit N]
+
+  jsw show ID|URL         # show one posting by UUID or ATS source URL
+
+  jsw promote ID|URL [--note TEXT]
+                          # promote a posting → creates application + triggers enrichment
+
+  jsw draft ID|URL [--model MODEL_ID]
+                          # trigger AI draft generation for an application
+"""
+
+import argparse
+import json
+import os
+import sys
+import textwrap
+from datetime import datetime
+from urllib.parse import urljoin
+
+try:
+    import requests
+except ImportError:
+    sys.exit("requests is required: uv add requests  (or pip install requests)")
+
+
+# ---------------------------------------------------------------------------
+# HTTP helpers
+# ---------------------------------------------------------------------------
+
+def _base_url() -> str:
+    url = os.environ.get("JSW_API_URL", "").rstrip("/")
+    if not url:
+        sys.exit(
+            "Set JSW_API_URL to the job-search-api base URL.\n"
+            "  Quick start: kubectl port-forward -n <ns> svc/job-search-api-development 8080:8080\n"
+            "               export JSW_API_URL=http://localhost:8080"
+        )
+    return url
+
+
+def _get(path: str, params: dict | None = None) -> dict:
+    url = _base_url() + path
+    r = requests.get(url, params={k: v for k, v in (params or {}).items() if v is not None}, timeout=30)
+    if not r.ok:
+        sys.exit(f"API error {r.status_code}: {r.text[:300]}")
+    return r.json()
+
+
+def _post(path: str, body: dict | None = None) -> dict:
+    url = _base_url() + path
+    r = requests.post(url, json=body or {}, timeout=60)
+    if not r.ok:
+        sys.exit(f"API error {r.status_code}: {r.text[:300]}")
+    return r.json()
+
+
+# ---------------------------------------------------------------------------
+# ID resolution — accepts UUID or ATS source URL
+# ---------------------------------------------------------------------------
+
+def _resolve_id(id_or_url: str) -> str:
+    """Return UUID string. If input looks like a URL, look it up by source_url."""
+    if id_or_url.startswith("http"):
+        data = _get("/postings", {"source_url": id_or_url, "limit": 1})
+        results = data.get("results", [])
+        if not results:
+            sys.exit(f"No posting found with source URL: {id_or_url}")
+        return str(results[0]["id"])
+    return id_or_url
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+_REVIEW_ICONS = {
+    "promoted":    "★",
+    "flagged":     "⚑",
+    "thumbs_up":   "↑",
+    "thumbs_down": "↓",
+    "reviewed":    "✓",
+    "unreviewed":  " ",
+}
+
+
+def _fmt_date(d) -> str:
+    if not d:
+        return "      "
+    try:
+        return datetime.fromisoformat(str(d)).strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return str(d)[:10]
+
+
+def _truncate(s: str, width: int) -> str:
+    if not s:
+        return ""
+    s = s.replace("\n", " ")
+    return s if len(s) <= width else s[: width - 1] + "…"
+
+
+def _col_widths(rows: list[dict], keys: list[str], headers: list[str]) -> list[int]:
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, key in enumerate(keys):
+            widths[i] = max(widths[i], len(str(row.get(key) or "")))
+    return widths
+
+
+def _print_table(rows: list[dict], keys: list[str], headers: list[str], max_widths: list[int | None] = None):
+    if not rows:
+        print("  (no results)")
+        return
+    widths = _col_widths(rows, keys, headers)
+    if max_widths:
+        widths = [min(w, mx) if mx else w for w, mx in zip(widths, max_widths)]
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    print("  ".join("-" * w for w in widths))
+    for row in rows:
+        values = [_truncate(str(row.get(k) or ""), widths[i]) for i, k in enumerate(keys)]
+        print(fmt.format(*values))
+
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+def cmd_list(args):
+    params = {
+        "location":     args.location,
+        "status":       args.status,
+        "review_state": args.state,
+        "company":      args.company,
+        "query":        args.query,
+        "limit":        args.limit,
+        "offset":       args.offset,
+    }
+    data = _get("/postings", params)
+    results = data.get("results", [])
+    total = data.get("total", len(results))
+
+    # Inject icon column
+    for r in results:
+        r["_icon"] = _REVIEW_ICONS.get(r.get("review_state", ""), " ")
+
+    _print_table(
+        results,
+        keys=["_icon", "id", "employer_name", "title", "location_city", "posted_date", "status"],
+        headers=["S", "ID", "Employer", "Title", "City", "Posted", "Status"],
+        max_widths=[1, 36, 24, 40, 12, 10, 6],
+    )
+    showing = min(args.limit, len(results))
+    print(f"\n  {showing} of {total} results  (--offset {args.offset + showing} for next page)")
+
+
+def cmd_show(args):
+    posting_id = _resolve_id(args.id_or_url)
+    detail = _get(f"/postings/{posting_id}")
+    p = detail.get("posting", detail)
+
+    print()
+    print(f"  {p.get('title', '—')}")
+    print(f"  {p.get('employer_name', p.get('employer', '—'))}")
+    print()
+    print(f"  ID        {p.get('id', '—')}")
+    print(f"  Status    {p.get('status', '—')}  ({p.get('review_state', '—')})")
+    print(f"  Location  {p.get('location_city', '—')}, {p.get('location_country', '—')}")
+    print(f"  Posted    {_fmt_date(p.get('posted_date'))}")
+    print(f"  Source    {p.get('source_url', '—')}")
+
+    if p.get("key_terms"):
+        print(f"\n  Key terms   {', '.join(p['key_terms'][:12])}")
+
+    enr = p.get("enrichment") or {}
+    if isinstance(enr, str):
+        enr = json.loads(enr)
+    if enr.get("responsibilities"):
+        print("\n  Responsibilities:")
+        for r in enr["responsibilities"][:5]:
+            print(f"    • {_truncate(r, 90)}")
+    if enr.get("requirements"):
+        print("\n  Requirements:")
+        for r in enr["requirements"][:5]:
+            print(f"    • {_truncate(r, 90)}")
+
+    desc = detail.get("description", "")
+    if desc:
+        print()
+        for line in textwrap.wrap(desc[:600], width=90):
+            print(f"  {line}")
+        if len(desc) > 600:
+            print("  … (truncated)")
+    print()
+
+
+def cmd_promote(args):
+    posting_id = _resolve_id(args.id_or_url)
+    body: dict = {"event_type": "promoted"}
+    if args.note:
+        body["note"] = args.note
+    result = _post(f"/postings/{posting_id}/events", body)
+    print(f"  Promoted: {result}")
+    print(f"\n  Enrichment running in background — key_terms/responsibilities/requirements")
+    print(f"  will be available shortly. Use 'jsw show {posting_id}' to check.")
+
+
+def cmd_draft(args):
+    posting_id = _resolve_id(args.id_or_url)
+    body: dict = {}
+    if args.model:
+        body["model_id"] = args.model
+
+    # Check available models if --list-models
+    if args.list_models:
+        models = _get("/draft-models")
+        for m in models.get("models", []):
+            print(f"  {m}")
+        return
+
+    print(f"  Triggering draft generation for {posting_id}…")
+    result = _post(f"/applications/{posting_id}/generate-drafts", body)
+    print(f"  {result}")
+    print()
+    print(f"  Draft generation runs in background. Poll status with:")
+    print(f"    jsw draft-status {posting_id}")
+
+
+def cmd_draft_status(args):
+    posting_id = _resolve_id(args.id_or_url)
+    result = _get(f"/applications/{posting_id}/draft-status")
+    status = result.get("draft_status", "unknown")
+    mr_url = result.get("resume_draft_mr_url", "")
+    print(f"  Status: {status}")
+    if mr_url:
+        print(f"  MR:     {mr_url}")
+
+
+def cmd_applications(args):
+    data = _get("/applications")
+    apps = data if isinstance(data, list) else data.get("applications", [])
+
+    for a in apps:
+        a["_icon"] = _REVIEW_ICONS.get("promoted", "★")
+
+    _print_table(
+        apps,
+        keys=["job_posting_id", "employer_name", "title", "status", "draft_status"],
+        headers=["Posting ID", "Employer", "Title", "App Status", "Draft"],
+        max_widths=[36, 24, 40, 12, 10],
+    )
+    print(f"\n  {len(apps)} application(s)")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="jsw",
+        description="job-search-watchlist CLI  (requires JSW_API_URL)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    sub = parser.add_subparsers(dest="cmd", metavar="COMMAND")
+    sub.required = True
+
+    # list
+    p_list = sub.add_parser("list", help="list postings with optional filters")
+    p_list.add_argument("--location", choices=["london", "dublin", "other"])
+    p_list.add_argument("--status", choices=["open", "closed"])
+    p_list.add_argument("--state", dest="state",
+                        choices=["unreviewed", "reviewed", "flagged", "promoted",
+                                 "thumbs_up", "thumbs_down"])
+    p_list.add_argument("--company", metavar="SLUG")
+    p_list.add_argument("--query", metavar="TEXT")
+    p_list.add_argument("--limit", type=int, default=25)
+    p_list.add_argument("--offset", type=int, default=0)
+    p_list.set_defaults(func=cmd_list)
+
+    # show
+    p_show = sub.add_parser("show", help="show a single posting by UUID or ATS URL")
+    p_show.add_argument("id_or_url", metavar="ID|URL")
+    p_show.set_defaults(func=cmd_show)
+
+    # promote
+    p_promote = sub.add_parser("promote", help="promote a posting (creates application + triggers enrichment)")
+    p_promote.add_argument("id_or_url", metavar="ID|URL")
+    p_promote.add_argument("--note", metavar="TEXT", help="optional note attached to the promotion event")
+    p_promote.set_defaults(func=cmd_promote)
+
+    # draft
+    p_draft = sub.add_parser("draft", help="trigger AI draft generation for a promoted application")
+    p_draft.add_argument("id_or_url", metavar="ID|URL")
+    p_draft.add_argument("--model", metavar="MODEL_ID", help="override Bedrock model ID")
+    p_draft.add_argument("--list-models", action="store_true", help="print available model IDs and exit")
+    p_draft.set_defaults(func=cmd_draft)
+
+    # draft-status
+    p_ds = sub.add_parser("draft-status", help="check draft generation status")
+    p_ds.add_argument("id_or_url", metavar="ID|URL")
+    p_ds.set_defaults(func=cmd_draft_status)
+
+    # applications
+    p_apps = sub.add_parser("applications", help="list all applications (promoted postings)")
+    p_apps.set_defaults(func=cmd_applications)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

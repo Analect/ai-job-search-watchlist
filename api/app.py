@@ -160,6 +160,7 @@ def get_postings(
     ),
     query: str | None = None,
     company: str | None = None,
+    source_url: str | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
@@ -169,6 +170,7 @@ def get_postings(
         review_state=review_state,
         query=query,
         company=company,
+        source_url=source_url,
         limit=limit,
         offset=offset,
     )
