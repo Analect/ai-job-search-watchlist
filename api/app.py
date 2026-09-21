@@ -42,6 +42,7 @@ from pipelines.common.postings import (
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
 from api.drafting import AVAILABLE_DRAFT_MODELS, DraftAlreadyMergedError, _delete_branch, close_mr, generate_drafts, generate_pdf, get_draft_files, merge_draft, update_draft_files
+from pipelines.enrichment.promoted_enrichment import enrich_promoted
 
 # OTel tracing — only initialised when OTEL_EXPORTER_OTLP_ENDPOINT is set so
 # local dev without a collector doesn't spin up a background export thread.
@@ -190,7 +191,7 @@ def get_posting_detail(posting_id: UUID) -> dict:
 
 
 @app.post("/postings/{posting_id}/events")
-def post_posting_event(posting_id: UUID, body: PostingEventRequest) -> dict:
+def post_posting_event(posting_id: UUID, body: PostingEventRequest, background_tasks: BackgroundTasks) -> dict:
     if body.event_type not in VALID_EVENT_TYPES:
         raise HTTPException(status_code=422, detail=f"invalid event_type: {body.event_type!r}")
 
@@ -210,6 +211,7 @@ def post_posting_event(posting_id: UUID, body: PostingEventRequest) -> dict:
                 "update job_postings set promoted = true where id = %s", (str(posting_id),)
             )
             conn.commit()
+        background_tasks.add_task(enrich_promoted, posting_id)
 
     elif body.event_type == "withdrawn":
         if not posting.get("promoted"):

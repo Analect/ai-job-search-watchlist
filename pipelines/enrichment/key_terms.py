@@ -52,6 +52,7 @@ def enrich_key_terms(job_posting_ids: list[str]) -> None:
             from job_postings jp
             left join descriptions d on d.job_posting_id = jp.id and d.locale = 'en'
             where jp.id = any(%s::uuid[])
+              and (jp.promoted is null or jp.promoted = false)
             """,
             (job_posting_ids,),
         )

@@ -9,9 +9,12 @@ GITLAB_RESUME_REPO_TOKEN from ESO (Vault: secret/gitlab/resume-repo-mr-token,
 T037).
 """
 
+import hashlib
 import json
 import os
 import re
+from math import sqrt
+from pathlib import Path
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -125,6 +128,32 @@ _FACTUAL_DOCS = [
     "system/candidate-profile.md",
 ]
 
+# Directory in the resume repo containing per-project detail files.
+# Each *.md file is fetched and injected as a separate block in the user
+# message, keeping candidate-profile.md lean while giving the model full
+# project context.
+_PROJECTS_PATH = "projects"
+
+# In-memory embedding cache for project files: content_hash -> vector.
+# Avoids re-calling Titan on every draft when project files haven't changed.
+_project_embedding_cache: dict[str, list[float]] = {}
+
+# Cached clean-prose system prompt, loaded once from the file alongside this module.
+_CLEAN_PROSE_PROMPT_PATH = Path(__file__).parent / "clean_prose_prompt.md"
+_clean_prose_prompt: str | None = None
+
+
+def _get_clean_prose_prompt() -> str:
+    global _clean_prose_prompt
+    if _clean_prose_prompt is None:
+        try:
+            _clean_prose_prompt = _CLEAN_PROSE_PROMPT_PATH.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise RuntimeError(
+                f"[drafting] could not load clean_prose_prompt.md: {exc}"
+            ) from exc
+    return _clean_prose_prompt
+
 # Cross-region inference profile ID. Must be one of the profiles covered by
 # the bedrock-agent-user BedrockInferenceProfiles IAM policy. Override at
 # deploy time via the DRAFTING_MODEL_ID env var (OpenChoreo environmentConfigs
@@ -223,6 +252,82 @@ def _slugify(text: str) -> str:
     return s.strip("-")[:40]
 
 
+def _fetch_posting_embedding(job_posting_id: UUID | str) -> list[float] | None:
+    """Return the stored Titan embedding for a posting, or None if absent."""
+    from pipelines.common.db import get_connection
+    with get_connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select embedding::text from job_postings where id = %s",
+            (str(job_posting_id),),
+        )
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    return [float(x) for x in row[0].strip("[]").split(",")]
+
+
+def _embed_project(content: str) -> list[float]:
+    """Embed project content via Titan v2, caching by content hash."""
+    from pipelines.enrichment.embeddings import embed_text
+    key = hashlib.md5(content.encode()).hexdigest()
+    if key not in _project_embedding_cache:
+        _project_embedding_cache[key] = embed_text(content)
+    return _project_embedding_cache[key]
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    mag_a = sqrt(sum(x * x for x in a))
+    mag_b = sqrt(sum(x * x for x in b))
+    if mag_a == 0 or mag_b == 0:
+        return 0.0
+    return dot / (mag_a * mag_b)
+
+
+def _rank_projects(
+    project_files: list[tuple[str, str]],
+    posting_embedding: list[float] | None,
+    top_k: int = 3,
+) -> list[tuple[str, str]]:
+    """Return the top_k most relevant projects ranked by cosine similarity.
+
+    Falls back to returning all projects unchanged when the posting has no
+    stored embedding or when the project count is already <= top_k.
+    Projects that fail to embed are retained with score 0 so they are not
+    silently dropped.
+    """
+    if posting_embedding is None or len(project_files) <= top_k:
+        return project_files
+
+    scored: list[tuple[float, str, str]] = []
+    for path, content in project_files:
+        try:
+            score = _cosine_similarity(posting_embedding, _embed_project(content))
+        except Exception as exc:
+            print(f"[drafting] warning: could not embed project {path!r}: {exc}", flush=True)
+            score = 0.0
+        scored.append((score, path, content))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [(path, content) for _, path, content in scored[:top_k]]
+
+
+def _fetch_project_files() -> list[tuple[str, str]]:
+    """Fetch all *.md files under projects/ in the resume repo.
+
+    Returns (slug, content) pairs sorted by slug, skipping any file that fails
+    to fetch with a warning.  An empty list is returned gracefully if the
+    directory does not exist or is empty.
+    """
+    try:
+        paths = [p for p in _list_repo_tree(_PROJECTS_PATH) if p.endswith(".md")]
+    except Exception as exc:
+        print(f"[drafting] warning: could not list {_PROJECTS_PATH!r}: {exc}", flush=True)
+        return []
+    paths.sort()
+    return _fetch_docs(paths)
+
+
 def _fetch_docs(paths: list[str]) -> list[tuple[str, str]]:
     """Fetch a list of documents from the resume repo.
 
@@ -244,6 +349,8 @@ def _draft_with_llm(
     letter_tmpl: str,
     application_notes: str | None = None,
     model_id: str | None = None,
+    project_files: list[tuple[str, str]] | None = None,
+    job_intelligence: dict | None = None,
 ) -> tuple[str, str]:
     """Call Bedrock Claude to draft the resume and cover letter.
 
@@ -284,13 +391,41 @@ fact not present in the Candidate Profile."""
         f"## {path}\n{content}" for path, content in factual_docs
     )
 
+    projects_section = ""
+    if project_files:
+        blocks = []
+        for path, content in project_files:
+            slug = path.split("/")[-1].replace(".md", "")
+            blocks.append(f"### {slug}\n{content.strip()}")
+        projects_section = (
+            "\n\n## Independent Projects — full detail\n"
+            "(Factual. Reference only projects listed here — do not invent others.)\n\n"
+            + "\n\n".join(blocks)
+        )
+
+    intelligence_section = ""
+    if job_intelligence:
+        parts = []
+        if job_intelligence.get("key_terms"):
+            parts.append("### Key technologies and domain terms\n" + ", ".join(job_intelligence["key_terms"]))
+        if job_intelligence.get("responsibilities"):
+            parts.append("### Key responsibilities\n" + "\n".join(f"- {r}" for r in job_intelligence["responsibilities"]))
+        if job_intelligence.get("requirements"):
+            parts.append("### Key requirements\n" + "\n".join(f"- {r}" for r in job_intelligence["requirements"]))
+        if parts:
+            intelligence_section = (
+                "\n\n## Pre-extracted job intelligence "
+                "(use these to guide tailoring — more reliable than parsing the raw description)\n\n"
+                + "\n\n".join(parts)
+            )
+
     prompt = f"""## Candidate Profile (factual ground truth — authoritative for all dates, \
 employers, locations, email, credentials)
 
-{factual_section}{notes_section}
+{factual_section}{projects_section}{notes_section}
 
 ## Job description
-{description}
+{description}{intelligence_section}
 
 ## Resume skeleton (typst — use this exact call syntax and structure; replace placeholders with real content)
 {resume_tmpl}
@@ -622,6 +757,54 @@ def _fix_typst_compile_error(content: str, kind: str, error: str, model_id: str)
     return text_blocks[0].strip()
 
 
+def _clean_ai_writing(content: str, kind: str, model_id: str) -> str:
+    """Run the clean-prose pass on a typst document.
+
+    Uses the distilled avoid-ai-writing rules in clean_prose_prompt.md as the
+    system prompt.  Only prose passages are rewritten; all typst syntax and
+    factual content are preserved per the prompt's instructions.
+
+    Returns the original content unchanged on any failure so a clean-pass
+    error never blocks the draft from being committed.
+    """
+    try:
+        system_prompt = _get_clean_prose_prompt()
+    except Exception as exc:
+        print(f"[drafting] clean pass skipped — {exc}", flush=True)
+        return content
+
+    client = _get_bedrock_client()
+    try:
+        response = client.invoke_model(
+            modelId=model_id,
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 8000,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": content}],
+            }),
+        )
+        body = json.loads(response["body"].read())
+        blocks = body.get("content", [])
+        text = next(
+            (b.get("text") for b in blocks if b.get("type") == "text" and b.get("text")),
+            None,
+        )
+        if not text:
+            print(
+                f"[drafting] clean pass ({kind}): no text in response — "
+                f"stop_reason={body.get('stop_reason')!r}; keeping original",
+                flush=True,
+            )
+            return content
+        return text.strip()
+    except Exception as exc:
+        print(f"[drafting] clean pass ({kind}) failed: {exc}; keeping original", flush=True)
+        return content
+
+
 def generate_pdf(branch: str, draft_path: str) -> bytes:
     """Compile a typst draft to PDF and return the raw bytes.
 
@@ -679,9 +862,23 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
     branch_name = f"{datetime_str}-{slug}"
     folder = branch_name
 
+    project_files = _fetch_project_files()
+    posting_embedding = _fetch_posting_embedding(job_posting_id)
+    top_k = int(os.environ.get("DRAFT_TOP_K_PROJECTS", "3"))
+    ranked_projects = _rank_projects(project_files, posting_embedding, top_k=top_k)
+
+    # Use pre-extracted job intelligence if available (written by enrich_promoted
+    # when the posting was promoted). Falls back gracefully to None.
+    raw_enrichment = posting.get("enrichment")
+    job_intelligence: dict | None = None
+    if isinstance(raw_enrichment, dict) and raw_enrichment.get("v") == 1:
+        job_intelligence = raw_enrichment
+
     resume_content, letter_content, trace_id, effective_model_id = _draft_with_llm(
         description, _RESUME_SKELETON, _LETTER_SKELETON,
         application_notes=application_notes, model_id=model_id,
+        project_files=ranked_projects or None,
+        job_intelligence=job_intelligence,
     )
 
     # Compile-and-fix: attempt typst compile for each file; on error send a
@@ -695,6 +892,12 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
                 resume_content = corrected
             else:
                 letter_content = corrected
+
+    # Clean-prose pass: remove AI-isms from the generated prose.
+    # Runs after compile-fix so any structural repairs are already in place.
+    # Failures fall back to the pre-clean content — they never block the commit.
+    resume_content = _clean_ai_writing(resume_content, "resume", effective_model_id)
+    letter_content = _clean_ai_writing(letter_content, "cover_letter", effective_model_id)
 
     resume_filename = f"{date_str}_mccoole_resume.typ"
     letter_filename = f"{date_str}_mccoole_letter.typ"

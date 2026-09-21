@@ -321,7 +321,8 @@ def get_job_detail(job_posting_id: UUID | str) -> dict | None:
                    jp.first_seen_at, jp.last_seen_at,
                    jp.reviewed, jp.flagged, jp.promoted, jp.thumbs, jp.comment,
                    jp.location_city is null as location_unknown,
-                   {_REVIEW_STATE_CASE} as review_state
+                   {_REVIEW_STATE_CASE} as review_state,
+                   jp.enrichment
             from job_postings jp
             join employers e on e.id = jp.employer_id
             where jp.id = %s
@@ -375,6 +376,7 @@ def get_job_detail(job_posting_id: UUID | str) -> dict | None:
             "comment": row[21],
             "location_unknown": row[22],
             "review_state": row[23],
+            "enrichment": row[24],
         },
         "description": desc_row[0] if desc_row else None,
         "events": [
