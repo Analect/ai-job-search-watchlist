@@ -22,6 +22,7 @@ import {
   type TraceSpan,
 } from "@/lib/api";
 import { TraceDrawer } from "@/components/TraceDrawer";
+import { MetadataDrawer, type JobMetadata } from "@/components/MetadataDrawer";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -65,6 +66,13 @@ export default function ApplicationsPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
   const saveNotesForId = useRef<string | null>(null);
+
+  // Metadata panel
+  const [metadataAppId, setMetadataAppId] = useState<string | null>(null);
+  const [metadataTitle, setMetadataTitle] = useState<string | null>(null);
+  const [metadataData, setMetadataData] = useState<JobMetadata | null>(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
 
   // Trace panel
   const [traceAppId, setTraceAppId] = useState<string | null>(null);
@@ -294,6 +302,47 @@ export default function ApplicationsPage() {
     setDraftFiles(null);
     setDraftError(null);
     setDraftFinalUrl(null);
+  };
+
+  const openMetadata = (app: Application, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (metadataAppId === app.job_posting_id) {
+      setMetadataAppId(null);
+      return;
+    }
+    setMetadataAppId(app.job_posting_id);
+    setMetadataTitle(`${app.title} — ${app.employer_name}`);
+    setMetadataData(null);
+    setMetadataError(null);
+    setMetadataLoading(true);
+    fetchPostingDetail(app.job_posting_id)
+      .then((detail) => {
+        const posting = detail.posting as Record<string, unknown>;
+        const enrichment = posting.enrichment as Record<string, unknown> | null | undefined;
+        const keyTerms = (posting.key_terms as string[] | null) ?? [];
+        if (enrichment?.v === 1) {
+          setMetadataData({
+            key_terms: keyTerms,
+            responsibilities: (enrichment.responsibilities as string[]) ?? [],
+            requirements: (enrichment.requirements as string[]) ?? [],
+          });
+        } else if (keyTerms.length > 0) {
+          // Has TF-IDF key_terms but no LLM enrichment yet
+          setMetadataData({ key_terms: keyTerms, responsibilities: [], requirements: [] });
+        } else {
+          setMetadataData(null);
+        }
+      })
+      .catch((err) => {
+        setMetadataError(err instanceof ApiError ? err.message : (err as Error).message);
+      })
+      .finally(() => setMetadataLoading(false));
+  };
+
+  const closeMetadata = () => {
+    setMetadataAppId(null);
+    setMetadataData(null);
+    setMetadataError(null);
   };
 
   const openTrace = (app: Application, e: React.MouseEvent) => {
@@ -530,6 +579,16 @@ export default function ApplicationsPage() {
                           </button>
                         ) : null}
 
+                        {app.status !== "withdrawn" ? (
+                          <button
+                            type="button"
+                            onClick={(e) => openMetadata(app, e)}
+                            className={`rounded-card border px-2 py-1 text-xs ${metadataAppId === app.job_posting_id ? "border-accent text-accent" : "border-border-subtle text-muted"}`}
+                          >
+                            {metadataLoading && metadataAppId === app.job_posting_id ? "Loading…" : "Metadata"}
+                          </button>
+                        ) : null}
+
                         {app.draft_trace_id ? (
                           <button
                             type="button"
@@ -724,6 +783,16 @@ export default function ApplicationsPage() {
         </table>
       </div>
       </div>
+
+      {metadataAppId ? (
+        <MetadataDrawer
+          title={metadataTitle}
+          metadata={metadataData}
+          loading={metadataLoading}
+          error={metadataError}
+          onClose={closeMetadata}
+        />
+      ) : null}
 
       {traceAppId ? (
         <TraceDrawer
