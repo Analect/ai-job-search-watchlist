@@ -750,6 +750,29 @@ def merge_draft(mr_url: str) -> dict:
             timeout=10,
         ).raise_for_status()
 
+    # Poll until GitLab considers the MR mergeable before attempting.
+    # After new commits land on the branch (e.g. from commit_draft_pdfs or
+    # prior saves), GitLab briefly recalculates merge status and returns 405
+    # if asked to merge during that window.
+    import time
+    for _attempt in range(6):
+        status_resp = requests.get(
+            f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}",
+            headers=_gitlab_headers(),
+            timeout=10,
+        )
+        status_resp.raise_for_status()
+        merge_status = status_resp.json().get("detailed_merge_status") or status_resp.json().get("merge_status")
+        mr_state = status_resp.json().get("state")
+        if mr_state == "merged":
+            raise DraftAlreadyMergedError("MR is already merged.")
+        if mr_state == "closed":
+            raise DraftAlreadyMergedError("MR is closed.")
+        if merge_status == "mergeable":
+            break
+        print(f"[drafting] merge_status={merge_status!r}, waiting before merge attempt…", flush=True)
+        time.sleep(3)
+
     resp = requests.put(
         f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}/merge",
         headers=_gitlab_headers(),
