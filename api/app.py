@@ -41,7 +41,7 @@ from pipelines.common.postings import (
 )
 from pipelines.common.similarity import find_similar
 from pipelines.common.watchlist import add_to_watchlist, remove_from_watchlist
-from api.drafting import AVAILABLE_DRAFT_MODELS, DraftAlreadyMergedError, _delete_branch, close_mr, generate_drafts, generate_pdf, get_draft_files, merge_draft, update_draft_files
+from api.drafting import AVAILABLE_DRAFT_MODELS, DraftAlreadyMergedError, _delete_branch, close_mr, commit_draft_pdfs, generate_drafts, generate_pdf, get_draft_files, merge_draft, update_draft_files
 from pipelines.enrichment.promoted_enrichment import enrich_promoted
 
 # OTel tracing — only initialised when OTEL_EXPORTER_OTLP_ENDPOINT is set so
@@ -526,6 +526,11 @@ def post_draft_merge(job_posting_id: UUID) -> dict:
     if draft is None or not draft.get("resume_draft_mr_url"):
         raise HTTPException(status_code=404, detail="no draft on record for this application")
     try:
+        commit_draft_pdfs(
+            draft["resume_draft_branch"],
+            draft["resume_draft_path"],
+            draft["cover_letter_draft_path"],
+        )
         result = merge_draft(draft["resume_draft_mr_url"])
     except DraftAlreadyMergedError as exc:
         raise HTTPException(status_code=409, detail=str(exc))

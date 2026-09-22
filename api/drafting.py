@@ -920,6 +920,48 @@ def generate_pdf(branch: str, draft_path: str) -> bytes:
     return letter_pdf
 
 
+def commit_draft_pdfs(branch: str, resume_path: str, cover_letter_path: str) -> None:
+    """Compile both draft .typ files to PDF and commit them to the branch.
+
+    Called just before merge so that the merged folder on main contains
+    .pdf files alongside the .typ sources, matching the convention used by
+    all other typst/ subfolders in mccoole/resume.
+
+    Uses generate_pdf() for each file so the cover letter gets the
+    slide-deck appendix automatically.
+    """
+    actions = []
+    for draft_path in (resume_path, cover_letter_path):
+        try:
+            pdf_bytes = generate_pdf(branch, draft_path)
+        except Exception as exc:
+            print(f"[drafting] warning: could not compile {draft_path} to PDF before merge: {exc}", flush=True)
+            continue
+        pdf_path = draft_path.replace(".typ", ".pdf")
+        import base64
+        actions.append({
+            "action": "create",
+            "file_path": pdf_path,
+            "content": base64.b64encode(pdf_bytes).decode(),
+            "encoding": "base64",
+        })
+
+    if not actions:
+        return
+
+    resp = requests.post(
+        f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/commits",
+        headers=_gitlab_headers(),
+        json={
+            "branch": branch,
+            "commit_message": "Add compiled PDFs",
+            "actions": actions,
+        },
+        timeout=60,
+    )
+    resp.raise_for_status()
+
+
 def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | None = None) -> dict:
     """Generate resume/cover-letter drafts for a posting and push to the
     resume repo as a reviewable MR.  Returns the draft metadata dict."""
