@@ -727,6 +727,22 @@ def merge_draft(mr_url: str) -> dict:
         raise ValueError(f"cannot parse MR IID from URL: {mr_url!r}")
     mr_iid = m.group(1)
 
+    # Remove Draft: prefix so GitLab allows the merge (draft MRs return 405).
+    mr_resp = requests.get(
+        f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}",
+        headers=_gitlab_headers(),
+        timeout=10,
+    )
+    mr_resp.raise_for_status()
+    current_title = mr_resp.json().get("title", "")
+    if current_title.startswith("Draft: "):
+        requests.put(
+            f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}",
+            headers=_gitlab_headers(),
+            json={"title": current_title[len("Draft: "):]},
+            timeout=10,
+        ).raise_for_status()
+
     resp = requests.put(
         f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}/merge",
         headers=_gitlab_headers(),
