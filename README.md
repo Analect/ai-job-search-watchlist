@@ -267,9 +267,42 @@ assembles the prompt, calls Bedrock, applies the clean-prose pass, and
 commits the result to a new branch + MR. The MR URL is shown once
 `draft-status` reports `drafting`.
 
-The cover letter PDF has the slide-deck cover page appended automatically
-(`mccoole/resume/assets/slide-deck-cover.pdf`). To refresh this when the
-`technical-docs-hierarchy` doc-set CSV changes:
+The cover letter PDF has the slide-deck cover page appended automatically.
+The integration spans three repos:
+
+```
+technical-docs-hierarchy/          mccoole/resume/                    job-search-api (pod)
+──────────────────────────         ────────────────                   ────────────────────
+20260518_test-set.csv              assets/
+                │                  └── slide-deck-cover.pdf  ◄──────  _fetch_repo_file()
+                │  sync-deck-cover.sh                                      │
+                └──────────────────►  (git commit + push)        generate_pdf()
+                   (local, manual                                      │
+                    after CSV change)                          typst compile
+                                                               letter.typ → letter.pdf
+                                                                           │
+                                                               pypdf merge │
+                                                                   ┌───────┘
+                                                                   │  slide-deck-cover.pdf
+                                                                   ▼
+                                                           combined_letter.pdf
+                                                                   │
+                                                                   │  HTTP response
+                                                           GET /applications/{id}/draft-pdf
+                                                               ?file=cover_letter
+                                                                   │
+                                                                   ▼
+                                                           Web UI "Download PDF" button
+```
+
+`generate_pdf()` is only called when a user clicks the PDF download button in
+the web UI. The `.typ` source files committed to the MR are unaffected — the
+appendix is added at PDF-render time only. `slide-deck-cover.pdf` is fetched
+from `mccoole/resume` `main` at request time, so pushing an updated file is
+sufficient to refresh it for all subsequent downloads without an API rebuild.
+
+To refresh `slide-deck-cover.pdf` when the `technical-docs-hierarchy` doc-set
+CSV changes (new pages added, titles updated):
 
 ```bash
 bash /path/to/mccoole/resume/analysis/scripts/sync-deck-cover.sh
@@ -277,6 +310,11 @@ bash /path/to/mccoole/resume/analysis/scripts/sync-deck-cover.sh
 TECH_DOCS_REPO=~/dev/gitlab/clients/analect/technical-docs-hierarchy \
   bash analysis/scripts/sync-deck-cover.sh
 ```
+
+The script regenerates `_20260518_test-set_menu-include.qmd` from the CSV,
+re-renders the cover page with `quarto --no-execute`, copies the PDF to
+`assets/slide-deck-cover.pdf`, and commits and pushes. It is a no-op if the
+PDF is binary-identical to what is already committed.
 
 ---
 
