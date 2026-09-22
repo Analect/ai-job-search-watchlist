@@ -8,6 +8,7 @@ COPY --from=typst-bin /bin/typst /usr/local/bin/typst
 WORKDIR /app
 ENV UV_CACHE_DIR=/tmp/uv-cache
 ENV PYTHONUNBUFFERED=1
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-liberation && rm -rf /var/lib/apt/lists/*
 RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "fastapi>=0.115" \
     "uvicorn[standard]>=0.30" \

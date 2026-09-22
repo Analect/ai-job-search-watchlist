@@ -10,6 +10,7 @@ T037).
 """
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -246,6 +247,14 @@ def _fetch_template(path: str) -> str:
     return _fetch_repo_file(path).decode()
 
 
+def _strip_html(text: str) -> str:
+    """Remove HTML tags and unescape entities from a job description."""
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return re.sub(r" {2,}", " ", text).strip()
+
+
 def _slugify(text: str) -> str:
     """Turn a job title into a short branch-name-safe slug."""
     s = text.lower()
@@ -416,7 +425,10 @@ fact not present in the Candidate Profile."""
         blocks = []
         for path, content in project_files:
             slug = path.split("/")[-1].replace(".md", "")
-            blocks.append(f"### {slug}\n{content.strip()}")
+            # Drop the ## Relevance signal section — it's meta-guidance for ranking,
+            # not substance the LLM needs when drafting.
+            trimmed = re.split(r"\n## Relevance signal\b", content, maxsplit=1)[0].strip()
+            blocks.append(f"### {slug}\n{trimmed}")
         projects_section = (
             "\n\n## Independent Projects — full detail\n"
             "(Factual. Reference only projects listed here — do not invent others.)\n\n"
@@ -877,7 +889,7 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
     from pipelines.common.applications import get as _get_application
 
     posting = detail["posting"]
-    description = detail["description"]  # caller already checked it's not None
+    description = _strip_html(detail["description"])  # strip HTML tags/entities before passing to LLM
     title = posting.get("title", "role")
     employer = posting.get("employer_name", "company")
 

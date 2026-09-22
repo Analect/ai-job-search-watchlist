@@ -252,7 +252,7 @@ def cmd_draft_status(args):
 
 def cmd_applications(args):
     data = _get("/applications")
-    apps = data if isinstance(data, list) else data.get("applications", [])
+    apps = data if isinstance(data, list) else data.get("results", data.get("applications", []))
 
     for a in apps:
         a["_icon"] = _REVIEW_ICONS.get("promoted", "★")
