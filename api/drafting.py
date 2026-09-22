@@ -940,6 +940,8 @@ def commit_draft_pdfs(branch: str, resume_path: str, cover_letter_path: str) -> 
     Uses generate_pdf() for each file so the cover letter gets the
     slide-deck appendix automatically.
     """
+    import base64
+
     actions = []
     for draft_path in (resume_path, cover_letter_path):
         try:
@@ -948,9 +950,17 @@ def commit_draft_pdfs(branch: str, resume_path: str, cover_letter_path: str) -> 
             print(f"[drafting] warning: could not compile {draft_path} to PDF before merge: {exc}", flush=True)
             continue
         pdf_path = draft_path.replace(".typ", ".pdf")
-        import base64
+        # Use "update" if the file already exists on the branch (e.g. retry),
+        # otherwise "create".
+        exists_resp = requests.head(
+            f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/repository/files/{pdf_path.replace('/', '%2F')}",
+            headers=_gitlab_headers(),
+            params={"ref": branch},
+            timeout=10,
+        )
+        action = "update" if exists_resp.status_code == 200 else "create"
         actions.append({
-            "action": "create",
+            "action": action,
             "file_path": pdf_path,
             "content": base64.b64encode(pdf_bytes).decode(),
             "encoding": "base64",
