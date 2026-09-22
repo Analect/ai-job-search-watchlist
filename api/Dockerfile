@@ -18,7 +18,8 @@ RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "boto3>=1.34" \
     "requests>=2.31" \
     "opentelemetry-sdk>=1.25" \
-    "opentelemetry-exporter-otlp-proto-http>=1.25"
+    "opentelemetry-exporter-otlp-proto-http>=1.25" \
+    "pypdf>=4.0"
 COPY pipelines/common/ pipelines/common/
 COPY pipelines/enrichment/ pipelines/enrichment/
 COPY pipelines/__init__.py pipelines/__init__.py

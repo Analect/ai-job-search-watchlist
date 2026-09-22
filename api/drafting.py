@@ -102,13 +102,13 @@ _LETTER_SKELETON = r"""#import "../templates/letter-template.typ": *
   name: [Colum McCoole],
 )
 
-[Opening paragraph: genuine interest in this specific role at this employer. 2–3 sentences maximum.]
+[Opening paragraph: genuine interest in this specific role at this employer — specific enough that it could not have been written for a different role. 2–3 sentences maximum.]
 
 [Body paragraph: direct line from most relevant experience to what this role needs.
-Specific employers and achievements from the candidate profile. 3–4 sentences maximum.
+Draw on specific employers, achievements, and dates from the candidate profile. 3–4 sentences maximum.
 Plain prose only — no typst function calls, no #link(), no #exp().]
 
-[Body paragraph: second distinct angle if relevant — keep to 3–4 sentences. Plain prose only.]
+[Body paragraph: name and briefly describe one independent project from the project files that most directly evidences a technical capability this role requires. Explain why it is relevant to this specific role in one sentence. 2–3 sentences total. Plain prose only.]
 
 [Closing paragraph: brief call to action. 1–2 sentences. Plain prose only.]
 
@@ -135,6 +135,18 @@ _FACTUAL_DOCS = [
 # message, keeping candidate-profile.md lean while giving the model full
 # project context.
 _PROJECTS_PATH = "projects"
+
+# Static PDF appended to every cover letter — slide-deck cover page.
+# Stored in the resume repo; updated by committing a new file to that path.
+_SLIDE_DECK_PATH = "assets/slide-deck-cover.pdf"
+
+# Fixed paragraph injected before #letterSignature in every cover letter.
+# Injected programmatically so it is always verbatim, never LLM-rewritten.
+_SLIDE_DECK_PARAGRAPH = (
+    "I'm attaching the cover of a slide-deck I use to convey ideas around AI. "
+    "Should any of the team want to review the full version, then please let me "
+    "know and I can easily email it."
+)
 
 # In-memory embedding cache for project files: content_hash -> vector.
 # Avoids re-calling Titan on every draft when project files haven't changed.
@@ -848,6 +860,18 @@ def _clean_ai_writing(content: str, kind: str, model_id: str) -> str:
         return content
 
 
+def _merge_pdfs(pdf_bytes_list: list[bytes]) -> bytes:
+    """Merge a list of PDF byte strings into one using pypdf."""
+    from pypdf import PdfWriter
+    import io
+    writer = PdfWriter()
+    for pdf_bytes in pdf_bytes_list:
+        writer.append(io.BytesIO(pdf_bytes))
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 def generate_pdf(branch: str, draft_path: str) -> bytes:
     """Compile a typst draft to PDF and return the raw bytes.
 
@@ -855,6 +879,9 @@ def generate_pdf(branch: str, draft_path: str) -> bytes:
     typst/templates/ and typst/logos/ from main, mirrors the repo's typst/
     subtree in a temp directory so relative imports resolve correctly, then
     runs `typst compile`.
+
+    For cover letter drafts (path ends with _letter.typ), appends the
+    slide-deck cover PDF from assets/slide-deck-cover.pdf in the resume repo.
     """
     import subprocess
     import tempfile
@@ -880,7 +907,17 @@ def generate_pdf(branch: str, draft_path: str) -> bytes:
             stderr = result.stderr.decode(errors="replace")
             raise RuntimeError(f"typst compile failed: {stderr}")
 
-        return out_pdf.read_bytes()
+        letter_pdf = out_pdf.read_bytes()
+
+    # Append slide-deck cover for cover letter PDFs only.
+    if draft_path.endswith("_letter.typ"):
+        try:
+            deck_pdf = _fetch_repo_file(_SLIDE_DECK_PATH)
+            return _merge_pdfs([letter_pdf, deck_pdf])
+        except Exception as exc:
+            print(f"[drafting] warning: could not append slide deck PDF: {exc}", flush=True)
+
+    return letter_pdf
 
 
 def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | None = None) -> dict:
@@ -953,6 +990,16 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
     # Failures fall back to the pre-clean content — they never block the commit.
     resume_content = _clean_ai_writing(resume_content, "resume", effective_model_id)
     letter_content = _clean_ai_writing(letter_content, "cover_letter", effective_model_id)
+
+    # Inject slide-deck paragraph before #letterSignature — always verbatim,
+    # never subject to LLM rewriting or omission.
+    sig_marker = '#letterSignature('
+    if sig_marker in letter_content:
+        letter_content = letter_content.replace(
+            sig_marker,
+            f"{_SLIDE_DECK_PARAGRAPH}\n\n{sig_marker}",
+            1,
+        )
 
     resume_filename = f"{date_str}_mccoole_resume.typ"
     letter_filename = f"{date_str}_mccoole_letter.typ"
