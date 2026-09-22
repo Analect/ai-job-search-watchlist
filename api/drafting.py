@@ -734,12 +734,19 @@ def merge_draft(mr_url: str) -> dict:
         timeout=10,
     )
     mr_resp.raise_for_status()
-    current_title = mr_resp.json().get("title", "")
-    if current_title.startswith("Draft: "):
+    mr_data = mr_resp.json()
+    current_title = mr_data.get("title", "")
+    is_draft = mr_data.get("draft", False) or current_title.startswith("Draft: ") or current_title.startswith("WIP: ")
+    if is_draft:
+        clean_title = current_title
+        for prefix in ("Draft: ", "WIP: "):
+            if clean_title.startswith(prefix):
+                clean_title = clean_title[len(prefix):]
+                break
         requests.put(
             f"{_GITLAB_API}/projects/{_RESUME_PROJECT}/merge_requests/{mr_iid}",
             headers=_gitlab_headers(),
-            json={"title": current_title[len("Draft: "):]},
+            json={"title": clean_title, "draft": False},
             timeout=10,
         ).raise_for_status()
 
@@ -749,7 +756,7 @@ def merge_draft(mr_url: str) -> dict:
         timeout=20,
     )
     if resp.status_code == 405:
-        raise DraftAlreadyMergedError("MR branch is already merged or closed")
+        raise DraftAlreadyMergedError(f"GitLab rejected merge (405) — MR may still be in draft, already merged, or have unresolved threads. Response: {resp.text[:200]}")
     resp.raise_for_status()
 
     branch = resp.json().get("source_branch", "")
