@@ -132,7 +132,7 @@ export default function ApplicationsPage() {
     advanceApplicationStatus(app.job_posting_id, status)
       .then(() => {
         setApplications((prev) =>
-          prev.map((a) => (a.id === app.id ? { ...a, status } : a)),
+          prev.map((a) => (a.job_posting_id === app.job_posting_id ? { ...a, status } : a)),
         );
       })
       .catch((err) =>
@@ -145,7 +145,7 @@ export default function ApplicationsPage() {
     postPostingEvent(app.job_posting_id, "withdrawn")
       .then(() => {
         setApplications((prev) =>
-          prev.map((a) => (a.id === app.id ? { ...a, status: "withdrawn" } : a)),
+          prev.map((a) => (a.job_posting_id === app.job_posting_id ? { ...a, status: "withdrawn" } : a)),
         );
       })
       .catch((err) =>
@@ -228,7 +228,7 @@ export default function ApplicationsPage() {
     setDraftingId(app.job_posting_id);
     setActionError(null);
     setApplications((prev) =>
-      prev.map((a) => (a.id === app.id ? { ...a, resume_draft_mr_url: null } : a)),
+      prev.map((a) => (a.job_posting_id === app.job_posting_id ? { ...a, resume_draft_mr_url: null } : a)),
     );
     redraft(app.job_posting_id, selectedModel || undefined)
       .then((result: DraftResult) => {
