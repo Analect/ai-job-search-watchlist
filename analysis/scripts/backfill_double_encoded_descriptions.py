@@ -37,9 +37,10 @@ def run() -> None:
 
     fixed = 0
     skipped = 0
-    offset = 0
 
     while True:
+        # Always query from offset 0 — fixed rows drop out of the WHERE clause,
+        # so advancing an offset would skip over rows that shifted up.
         with get_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -47,9 +48,9 @@ def run() -> None:
                   from descriptions
                  where content ~ '&lt;[a-zA-Z]'
                  order by job_posting_id, locale
-                 limit %s offset %s
+                 limit %s
                 """,
-                (BATCH_SIZE, offset),
+                (BATCH_SIZE,),
             )
             rows = cur.fetchall()
 
@@ -76,8 +77,7 @@ def run() -> None:
                 conn.commit()
             fixed += 1
 
-        offset += BATCH_SIZE
-        print(f"  progress: {fixed} fixed, {skipped} skipped (batch offset {offset})")
+        print(f"  progress: {fixed} fixed, {skipped} skipped")
 
     print(f"\nBackfill complete: {fixed} rows fixed, {skipped} rows skipped.")
 
