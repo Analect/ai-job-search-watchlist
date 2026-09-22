@@ -10,7 +10,6 @@ T037).
 """
 
 import hashlib
-import html
 import json
 import os
 import re
@@ -22,6 +21,8 @@ from uuid import UUID
 
 import boto3
 import requests
+
+from pipelines.common.text_clean import html_to_text
 
 _GITLAB_API = "https://gitlab.analect.com/api/v4"
 _RESUME_PROJECT = "mccoole%2Fresume"  # URL-encoded project path
@@ -258,13 +259,6 @@ def _fetch_typst_assets(tmp: "Path") -> None:
 def _fetch_template(path: str) -> str:
     return _fetch_repo_file(path).decode()
 
-
-def _strip_html(text: str) -> str:
-    """Remove HTML tags and unescape entities from a job description."""
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = html.unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return re.sub(r" {2,}", " ", text).strip()
 
 
 def _slugify(text: str) -> str:
@@ -968,7 +962,7 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
     from pipelines.common.applications import get as _get_application
 
     posting = detail["posting"]
-    description = _strip_html(detail["description"])  # strip HTML tags/entities before passing to LLM
+    description = html_to_text(detail["description"])  # strip HTML tags/entities before passing to LLM
     title = posting.get("title", "role")
     employer = posting.get("employer_name", "company")
 
