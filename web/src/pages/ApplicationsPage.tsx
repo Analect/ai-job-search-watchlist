@@ -471,7 +471,19 @@ export default function ApplicationsPage() {
                     onClick={() => selectApp(app.job_posting_id)}
                   >
                     <td className="py-3 px-3">
-                      <p className="font-medium text-ink">{app.title}</p>
+                      {app.source_url ? (
+                        <a
+                          href={app.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-accent underline hover:opacity-80"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {app.title}
+                        </a>
+                      ) : (
+                        <p className="font-medium text-ink">{app.title}</p>
+                      )}
                       <p className="text-xs text-muted">{app.employer_name}</p>
                     </td>
                     <td className={`py-3 px-3 ${STATUS_CLASS[app.status]}`}>
@@ -636,8 +648,10 @@ export default function ApplicationsPage() {
                               <div
                                 className="prose prose-sm max-w-none overflow-y-auto rounded-card border border-border-subtle bg-surface p-3 text-ink"
                                 style={{ maxHeight: 260 }}
-                                dangerouslySetInnerHTML={{ __html: descText }}
-                              />
+                              >
+                                <p className="mb-2 font-mono text-xs text-muted select-all">{app.job_posting_id}</p>
+                                <div dangerouslySetInnerHTML={{ __html: descText }} />
+                              </div>
                             ) : (
                               <p className="text-sm text-muted">Description unavailable.</p>
                             )}

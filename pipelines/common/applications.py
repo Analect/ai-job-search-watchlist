@@ -143,7 +143,7 @@ def list_all() -> list[dict]:
                    a.resume_draft_mr_url, a.draft_generated_at,
                    a.created_at, a.updated_at,
                    a.application_notes, a.draft_model_id, a.draft_error,
-                   a.draft_trace_id
+                   a.draft_trace_id, jp.source_url
               from applications a
               join job_postings jp on jp.id = a.job_posting_id
               join employers e on e.id = jp.employer_id
@@ -164,6 +164,7 @@ def list_all() -> list[dict]:
             "draft_model_id": r[10],
             "draft_error": r[11],
             "draft_trace_id": r[12],
+            "source_url": r[13],
         }
         for r in rows
     ]

@@ -217,6 +217,7 @@ export interface Application {
   job_posting_id: string;
   title: string;
   employer_name: string;
+  source_url: string | null;
   status: "promoted" | "drafting" | "submitted" | "withdrawn";
   resume_draft_mr_url: string | null;
   draft_generated_at: string | null;
