@@ -966,8 +966,14 @@ def generate_drafts(job_posting_id: UUID | str, detail: dict, model_id: str | No
         ranking_embedding = _fetch_posting_embedding(job_posting_id)
     ranked_projects = _rank_projects(project_files, ranking_embedding, top_k=top_k)
 
+    date_human = now.strftime("%-d %B %Y")
+    letter_tmpl_with_date = _LETTER_SKELETON.replace(
+        "[Date — e.g. 15 September 2026]",
+        date_human,
+    )
+
     resume_content, letter_content, trace_id, effective_model_id, trace_payload = _draft_with_llm(
-        description, _RESUME_SKELETON, _LETTER_SKELETON,
+        description, _RESUME_SKELETON, letter_tmpl_with_date,
         application_notes=application_notes, model_id=model_id,
         project_files=ranked_projects or None,
         job_intelligence=job_intelligence,
