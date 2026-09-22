@@ -267,6 +267,17 @@ assembles the prompt, calls Bedrock, applies the clean-prose pass, and
 commits the result to a new branch + MR. The MR URL is shown once
 `draft-status` reports `drafting`.
 
+The cover letter PDF has the slide-deck cover page appended automatically
+(`mccoole/resume/assets/slide-deck-cover.pdf`). To refresh this when the
+`technical-docs-hierarchy` doc-set CSV changes:
+
+```bash
+bash /path/to/mccoole/resume/analysis/scripts/sync-deck-cover.sh
+# or with a custom tech-docs path:
+TECH_DOCS_REPO=~/dev/gitlab/clients/analect/technical-docs-hierarchy \
+  bash analysis/scripts/sync-deck-cover.sh
+```
+
 ---
 
 ## Key operational commands
@@ -280,6 +291,14 @@ kubectl logs -n $NS -l app=enrichment-pipeline-development -f
 
 # Check all kustomization health (Flux)
 kubectl get kustomization -A
+
+# Rebuild component images (triggers Docker build from latest main commit)
+occ component workflow run job-search-api -n analect -p ai-job-search-watchlist
+occ component workflow run job-search-mcp -n analect -p ai-job-search-watchlist
+occ component workflow run job-search-web -n analect -p ai-job-search-watchlist
+
+# Watch workflow run status after triggering a rebuild
+occ component workflowrun list job-search-api -n analect -p ai-job-search-watchlist
 
 # Restart the API pod (e.g. after a code change via image rebuild)
 kubectl rollout restart deployment/job-search-api-development -n $NS
