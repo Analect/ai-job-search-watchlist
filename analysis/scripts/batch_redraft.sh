@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
 # Batch re-draft a list of job posting UUIDs against the running job-search-api pod.
 # Edit JOB_IDS below to target a different set of applications.
+#
+# Usage: batch_redraft.sh [--model <model_id>]
+#   --model   Bedrock model ID override (default: us.anthropic.claude-sonnet-5)
+#             e.g. --model us.anthropic.claude-sonnet-4-6
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+MODEL="us.anthropic.claude-sonnet-5"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model) MODEL="$2"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
 
 # Replace this list with any set of job posting UUIDs to re-draft.
 JOB_IDS=(
@@ -31,8 +43,9 @@ if [[ -z "$POD" ]]; then
   exit 1
 fi
 
-echo "Pod: $NS/$POD"
-echo "Jobs: ${#JOB_IDS[@]}"
+echo "Pod:   $NS/$POD"
+echo "Model: $MODEL"
+echo "Jobs:  ${#JOB_IDS[@]}"
 echo ""
 
-kubectl exec -i -n "$NS" "$POD" -- python3 - "${JOB_IDS[@]}" < "$SCRIPT_DIR/batch_redraft.py"
+kubectl exec -i -n "$NS" "$POD" -- python3 - --model "$MODEL" "${JOB_IDS[@]}" < "$SCRIPT_DIR/batch_redraft.py"

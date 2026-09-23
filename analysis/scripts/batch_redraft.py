@@ -14,12 +14,20 @@ from api.drafting import _delete_branch, close_mr
 from pipelines.common import applications as apps_module
 from pipelines.common.postings import get_job_detail
 
-job_ids = sys.argv[1:]
+DEFAULT_MODEL = "us.anthropic.claude-sonnet-5"
+
+args = sys.argv[1:]
+model = DEFAULT_MODEL
+if args and args[0] == "--model":
+    model = args[1]
+    args = args[2:]
+
+job_ids = args
 if not job_ids:
-    print("Usage: batch_redraft.py <uuid> [<uuid> ...]", flush=True)
+    print("Usage: batch_redraft.py [--model <model_id>] <uuid> [<uuid> ...]", flush=True)
     sys.exit(1)
 
-print(f"Batch re-draft: {len(job_ids)} job(s)", flush=True)
+print(f"Batch re-draft: {len(job_ids)} job(s) | model: {model}", flush=True)
 print(flush=True)
 
 for i, job_id in enumerate(job_ids, 1):
@@ -52,7 +60,7 @@ for i, job_id in enumerate(job_ids, 1):
     apps_module.set_draft_pending(UUID(job_id))
 
     try:
-        _run_generate_drafts(UUID(job_id), detail, "us.anthropic.claude-sonnet-5")
+        _run_generate_drafts(UUID(job_id), detail, model)
         print(f"  OK", flush=True)
     except Exception as e:
         print(f"  FAILED: {e}", flush=True)
