@@ -424,7 +424,7 @@ fact not present in the Candidate Profile.
 This rule applies equally to project descriptions: every specific claim made about an \
 independent project (status, affiliations, certifications, submission to external \
 bodies, deployment counts, client numbers) must appear verbatim in the supplied \
-project file. Do not add claims from general knowledge about these projects.
+project file. Do not add claims from general knowledge about these projects."""
 
     notes_section = ""
     if application_notes and application_notes.strip():
