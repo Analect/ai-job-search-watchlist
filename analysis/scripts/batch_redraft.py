@@ -52,7 +52,7 @@ for i, job_id in enumerate(job_ids, 1):
     apps_module.set_draft_pending(UUID(job_id))
 
     try:
-        _run_generate_drafts(UUID(job_id), detail)
+        _run_generate_drafts(UUID(job_id), detail, "us.anthropic.claude-sonnet-5")
         print(f"  OK", flush=True)
     except Exception as e:
         print(f"  FAILED: {e}", flush=True)
