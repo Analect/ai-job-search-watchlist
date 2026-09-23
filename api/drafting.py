@@ -103,31 +103,19 @@ _LETTER_SKELETON = r"""#import "../templates/letter-template.typ": *
   name: [Colum McCoole],
 )
 
-[Opening paragraph: DO NOT open with "I am writing to apply for", "I'm writing about", "I am writing to express interest in", or any similar variant — these are boilerplate.
-Open with one of:
-  (a) a specific observation about the employer's current context or challenge that this role addresses, followed by a one-sentence positioning claim that only this candidate could make; or
-  (b) a direct positioning claim — "[what this role requires] is [what the candidate has specifically done for X years / built at Y]"; or
-  (c) a sentence naming something concrete the candidate has built or done, then connecting it directly to this specific role and employer.
-Do NOT use headcount figures, revenue numbers, or other statistics lifted verbatim from the job description — reference context, not their own data back at them.
-2–3 sentences maximum. Must be specific to this employer and role — not reusable elsewhere without editing.]
+[Opening paragraph — employer-first positioning. Structure: one sentence naming a specific thing the employer is doing, building, or facing (drawn from the job description or what is publicly known about this employer) that makes this role exist — then one sentence connecting the candidate's career arc to that specific context. Do NOT lead with what the candidate has built. Do NOT open with "I am writing to apply for", "I'm writing about", or any variant. Do NOT use headcount figures, revenue numbers, or statistics lifted verbatim from the job description. The result must be specific to this employer and role — not reusable for a different employer without rewriting. 2 sentences maximum.]
 
-[Body paragraph: draw the direct line from the candidate's most relevant experience to what this role requires.
-Use specific employers, achievements, and dates from the candidate profile. 3–4 sentences maximum.
-— If the role is at a financial institution, or requires finance-domain expertise or judgment: explicitly state "twenty-plus years" of finance experience; name the #1 Institutional Investor All-Europe analyst credential (convertible bonds, Morgan Stanley, three consecutive years); name the relevant employers by name (Morgan Stanley, UBS Asset Management, Tantallon Capital, Plutus Capital as applicable). Do not abstract this experience as "the decades before that" without naming what was done where.
-— If the candidate's application notes name specific technologies, projects, or selling points: those MUST be addressed in the letter. They are the candidate's own judgment about what is most relevant after reading the role — weight them above your own project selection.
-Plain prose only — no typst function calls, no #link(), no #exp().]
+[Body paragraph — career arc through to present. Write the candidate's career as a single coherent trajectory: from early finance career through to current work at Analect (2021–present). State "twenty-plus years" in finance explicitly. Name at least two employers from the finance career (Morgan Stanley, UBS Asset Management, Tantallon Capital, Plutus Capital — choose those most relevant to this role). The #1 Institutional Investor All-Europe analyst credential (convertible bonds, Morgan Stanley) is available as supporting detail if the role specifically values research credibility or finance depth — use it only if it adds to the argument; omit it if it would read as ancient history. Then close the paragraph with what the candidate is doing NOW at Analect (2021–present), named specifically. The arc must reach the present — do not stop at UBS. Use the application notes to determine which aspect of current Analect work to foreground. 3–4 sentences maximum. Plain prose only — no typst function calls.]
 
-[Body paragraph: name and briefly describe one independent project from the project files that most directly evidences a technical capability this role requires. Explain why it is relevant to this specific role in one sentence. 2–3 sentences total.
-Project selection — apply in order:
-  1. If the candidate's application notes name a specific project or technology, that takes priority.
-  2. For roles at financial institutions, involving finance-domain AI, or requiring production-scale ML systems on real data: prefer synthetic-wealth-adviser (20 OpenChoreo components, six years of simulated trading history, TabPFN + LLM governance, real market data). Do NOT use job-search-mcp for applications to external employers.
-  3. For roles requiring governed agent platforms, MCP tool federation, multi-tenant agent control, or CNCF-adjacent work: CAIPE or OpenChoreo are appropriate. Note: OpenChoreo provides the cloud-native runtime and tenant isolation; CAIPE provides the agent control plane on top — describe whichever layer the role most cares about, or both briefly.
-  4. For roles requiring AI coding tooling, developer-experience tooling, or spec-driven development workflows: ai-dev-spec-driven-development is appropriate.
-Plain prose only.]
+[Body paragraph — one named project. Select one project from the supplied project files (synthetic-wealth-adviser, CAIPE, ai-dev-spec-driven-development, or another from the files) and describe it using only facts from that project file — do not blend it with general platform infrastructure description. Name the project explicitly. State what it does in concrete terms, then connect that directly to a specific requirement of this role in one sentence.
+Selection guidance (use the application notes first; fall back to this):
+  — Finance institution or finance-domain AI role: synthetic-wealth-adviser.
+  — Governed agent platform, MCP federation, multi-tenant agent control: CAIPE (note: runs on OpenChoreo; name both if relevant to the role, but describe from the CAIPE project file).
+  — AI coding tooling or spec-driven development: ai-dev-spec-driven-development.
+  — Do NOT use job-search-mcp for applications to any external employer.
+2–3 sentences. Plain prose only.]
 
-[Closing paragraph: DO NOT use "I'd welcome the chance to discuss how this background could apply to [X]" or end with "Thank you for your consideration" as a standalone sentence — these appear in every other letter and signal template use.
-Instead: close with a specific, concrete statement — e.g. naming something running in your current infrastructure that maps directly to what the team is building, referencing a specific aspect of the role you find interesting enough to want to discuss, or a direct availability statement with the right-to-work fact if relevant.
-1–2 sentences. Plain prose only.]
+[Closing paragraph — specific and brief. Do NOT use "I'd welcome the chance to discuss how this background applies" or "Thank you for your consideration" as standalone sentences. Close with one concrete, role-specific statement: a direct availability note (right-to-work fact if relevant), or a single sentence naming something specific about the role or team that makes it worth a conversation. 1–2 sentences. Plain prose only.]
 
 #letterSignature("../logos/mccoole_signature.png")
 """
@@ -436,12 +424,11 @@ fact not present in the Candidate Profile."""
     notes_section = ""
     if application_notes and application_notes.strip():
         notes_section = (
-            "\n\n## Candidate guidance — HIGH PRIORITY\n"
+            "\n\n## Candidate guidance\n"
             "The candidate has read this job description and provided the following "
-            "guidance about what to emphasise. This reflects their own judgment about "
-            "their strongest selling points for this specific role. Address every point "
-            "raised here explicitly in the cover letter — do not treat this as a soft "
-            "suggestion.\n\n"
+            "notes. Use these to steer emphasis and framing — which aspect of the "
+            "career arc to foreground, which project to feature, what tone to take. "
+            "Do not treat them as a checklist to fulfil line by line.\n\n"
             + application_notes.strip()
         )
 
