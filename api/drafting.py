@@ -107,15 +107,15 @@ _LETTER_SKELETON = r"""#import "../templates/letter-template.typ": *
 
 [Body paragraph — career arc through to present. Write the candidate's career as a single coherent trajectory: from early finance career through to current work at Analect (2021–present). State "twenty-plus years" in finance explicitly. Name at least two employers from the finance career (Morgan Stanley, UBS Asset Management, Tantallon Capital, Plutus Capital — choose those most relevant to this role). The #1 Institutional Investor All-Europe analyst credential (convertible bonds, Morgan Stanley) is available as supporting detail if the role specifically values research credibility or finance depth — use it only if it adds to the argument; omit it if it would read as ancient history. Then close the paragraph with what the candidate is doing NOW at Analect (2021–present), named specifically. The arc must reach the present — do not stop at UBS. Use the application notes to determine which aspect of current Analect work to foreground. 3–4 sentences maximum. Plain prose only — no typst function calls.]
 
-[Body paragraph — one named project. Select one project from the supplied project files (synthetic-wealth-adviser, CAIPE, ai-dev-spec-driven-development, or another from the files) and describe it using only facts from that project file — do not blend it with general platform infrastructure description. Name the project explicitly. State what it does in concrete terms, then connect that directly to a specific requirement of this role in one sentence.
+[Body paragraph — one named project. Select one project from the supplied project files and describe it using ONLY facts that appear in that project file — do not add claims from general knowledge, do not invent statuses, affiliations, or achievements not stated in the file. Name the project explicitly. State what it does in concrete terms drawn from the file, then connect that to a specific requirement of this role in one sentence.
 Selection guidance (use the application notes first; fall back to this):
   — Finance institution or finance-domain AI role: synthetic-wealth-adviser.
-  — Governed agent platform, MCP federation, multi-tenant agent control: CAIPE (note: runs on OpenChoreo; name both if relevant to the role, but describe from the CAIPE project file).
+  — Governed agent platform, MCP federation, multi-tenant agent control: CAIPE (runs on OpenChoreo; name both if relevant, but use only what the CAIPE project file states).
   — AI coding tooling or spec-driven development: ai-dev-spec-driven-development.
   — Do NOT use job-search-mcp for applications to any external employer.
 2–3 sentences. Plain prose only.]
 
-[Closing paragraph — specific and brief. Do NOT use "I'd welcome the chance to discuss how this background applies" or "Thank you for your consideration" as standalone sentences. Close with one concrete, role-specific statement: a direct availability note (right-to-work fact if relevant), or a single sentence naming something specific about the role or team that makes it worth a conversation. 1–2 sentences. Plain prose only.]
+[Closing paragraph — one sentence only. Do NOT mention right-to-work, nationality, or availability — assume these are not in question. Do NOT use "I'd welcome the chance to discuss" or "Thank you for your consideration". Note: a short slide-deck reference paragraph is appended automatically after this paragraph — do not duplicate it. Write one sentence that is specific to this role: either naming something concrete about the team's work that would make a conversation worthwhile, or a direct offer to demonstrate or discuss something from the preceding paragraphs. Plain prose only.]
 
 #letterSignature("../logos/mccoole_signature.png")
 """
@@ -419,7 +419,12 @@ employer names, exact employment dates, location, email address, certifications 
 with expiry dates, education — use ONLY what is stated in the Candidate Profile \
 section of the user message. If the Candidate Profile and the framing documents \
 conflict on a fact, the Candidate Profile always wins. Do NOT invent or infer any \
-fact not present in the Candidate Profile."""
+fact not present in the Candidate Profile.
+
+This rule applies equally to project descriptions: every specific claim made about an \
+independent project (status, affiliations, certifications, submission to external \
+bodies, deployment counts, client numbers) must appear verbatim in the supplied \
+project file. Do not add claims from general knowledge about these projects.
 
     notes_section = ""
     if application_notes and application_notes.strip():
