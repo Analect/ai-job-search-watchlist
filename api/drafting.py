@@ -103,19 +103,53 @@ _LETTER_SKELETON = r"""#import "../templates/letter-template.typ": *
   name: [Colum McCoole],
 )
 
-[Opening paragraph — employer-first positioning. Structure: one sentence naming a specific thing the employer is doing, building, or facing (drawn from the job description or what is publicly known about this employer) that makes this role exist — then one sentence connecting the candidate's career arc to that specific context. Do NOT lead with what the candidate has built. Do NOT open with "I am writing to apply for", "I'm writing about", or any variant. Do NOT use headcount figures, revenue numbers, or statistics lifted verbatim from the job description. The result must be specific to this employer and role — not reusable for a different employer without rewriting. 2 sentences maximum.]
+[Paragraph 1 — Why (compressed). One sentence naming something specific the employer is doing,
+building, or facing that makes this role exist — drawn from the job description or what is
+publicly known about this employer. Then one sentence connecting the candidate's career arc to
+that specific context. FORBIDDEN: "I am writing to apply for", "I'm writing about", or any
+variant. FORBIDDEN: headcount figures or revenue statistics lifted verbatim from the JD.
+Must be specific to this employer — not reusable for a different employer without rewriting.
+2 sentences maximum.]
 
-[Body paragraph — career arc through to present. Write the candidate's career as a single coherent trajectory: from early finance career through to current work at Analect (2021–present). State "twenty-plus years" in finance explicitly. Name at least two employers from the finance career (Morgan Stanley, UBS Asset Management, Tantallon Capital, Plutus Capital — choose those most relevant to this role). The #1 Institutional Investor All-Europe analyst credential (convertible bonds, Morgan Stanley) is available as supporting detail if the role specifically values research credibility or finance depth — use it only if it adds to the argument; omit it if it would read as ancient history. Then close the paragraph with what the candidate is doing NOW at Analect (2021–present), named specifically. The arc must reach the present — do not stop at UBS. Use the application notes to determine which aspect of current Analect work to foreground. 3–4 sentences maximum. Plain prose only — no typst function calls.]
+[Paragraph 2 — What: career as named deliverables. Write the career as a sequence of concrete
+outputs — what was built, shipped, or run — not a list of job titles. Include: "twenty-plus
+years" in finance stated explicitly; at least two named employers chosen for relevance to this
+role (Morgan Stanley, UBS Asset Management, Tantallon Capital, Plutus Capital); one named
+deliverable per employer clause (a platform, a product, a research franchise, a risk system).
+Close with what the candidate is building NOW at Analect (2021–present), named specifically;
+use the application notes to decide which aspect of Analect work to foreground.
+The arc must reach the present — do not stop at UBS.
+3–4 sentences. Plain prose only — no typst function calls.]
 
-[Body paragraph — one named project. Select one project from the supplied project files and describe it using ONLY facts that appear in that project file — do not add claims from general knowledge, do not invent statuses, affiliations, or achievements not stated in the file. Name the project explicitly. State what it does in concrete terms drawn from the file, then connect that to a specific requirement of this role in one sentence.
-Selection guidance (use the application notes first; fall back to this):
+[Paragraph 3 — What+How bridge: one named project. Select one project from the supplied project
+files using ONLY facts stated in that file — no claims from general knowledge, no invented
+statuses or affiliations. Name the project. In 2 sentences: (a) what it does in concrete terms
+from the file; (b) one sentence on how it was built or is operated — a constraint faced, a
+process decision made, or a technical choice that reveals working style, not just what was
+produced. Then one sentence connecting it to a specific requirement of this role.
+Selection guidance — use the application notes first; fall back to this:
   — Finance institution or finance-domain AI role: synthetic-wealth-adviser.
-  — Governed agent platform, MCP federation, multi-tenant agent control: CAIPE (runs on OpenChoreo; name both if relevant, but use only what the CAIPE project file states).
+  — Governed agent platform, MCP federation, multi-tenant agent control, agent evaluation:
+    caipe-openchoreo-platform (covers OpenChoreo, CAIPE, and WSO2 Agent Manager as three pillars).
   — AI coding tooling or spec-driven development: ai-dev-spec-driven-development.
-  — Do NOT use job-search-mcp for applications to any external employer.
-2–3 sentences. Plain prose only.]
+  — Do NOT use job-search-mcp or ai-job-search-watchlist for applications to any external employer.
+3 sentences. Plain prose only.]
 
-[Closing paragraph — one sentence only. Do NOT mention right-to-work, nationality, or availability — assume these are not in question. Do NOT use "I'd welcome the chance to discuss" or "Thank you for your consideration". Note: a short slide-deck reference paragraph is appended automatically after this paragraph — do not duplicate it. Write one sentence that is specific to this role: either naming something concrete about the team's work that would make a conversation worthwhile, or a direct offer to demonstrate or discuss something from the preceding paragraphs. Plain prose only.]
+[Paragraph 4 — How: operating style with evidence. 2–3 sentences on how the candidate works —
+the cross-role patterns that distinguish them beyond the CV. Draw evidence from the career arc
+and project work already described; do not repeat facts, reference them to ground a new claim.
+Write about: how the candidate bridges finance context and engineering delivery (give a concrete
+example of where both mattered simultaneously); how they operate under constraint or ambiguity
+(what they do when requirements are unclear or stakes are real); what they bring to a team
+beyond technical skill. These are behavioural claims backed by evidence — not abstract virtues
+("passionate", "results-driven", "collaborative"). Plain prose only.]
+
+[Closing — one sentence only. FORBIDDEN: "I'd welcome the chance to discuss", "Thank you for
+your consideration", "I'd love to", "I look forward to". Do NOT mention right-to-work,
+nationality, or availability. Note: a slide-deck reference paragraph is appended automatically
+after this — do not duplicate it. Write one sentence specific to this role: name something
+concrete about the team's work that would make a direct conversation worthwhile, or make a
+specific offer to demonstrate something from the preceding paragraphs. Plain prose only.]
 
 #letterSignature("../logos/mccoole_signature.png")
 """
