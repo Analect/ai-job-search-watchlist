@@ -141,6 +141,8 @@ practitioners…") for the same referent, use the clearest term consistently.
 **False concession** — "While X is impressive, Y remains a challenge" with both halves
 vague. Make it specific using the supplied facts, or cut the framing.
 
+**Defensive self-framing** — Constructions of the form "not just X", "not merely X", "not X layered on top of Y", "more than just X" — these signal insecurity rather than confidence. Cut the defensive clause entirely and let the positive claim stand on its own. Example: "a genuine bridge between business and engineering, not a technologist layered on top of a finance problem" → "a genuine bridge between business and engineering teams".
+
 ### Patterns that definitely do not belong in a resume or cover letter
 
 Remove entirely if present:
