@@ -103,15 +103,31 @@ _LETTER_SKELETON = r"""#import "../templates/letter-template.typ": *
   name: [Colum McCoole],
 )
 
-[Opening paragraph: genuine interest in this specific role at this employer — specific enough that it could not have been written for a different role. 2–3 sentences maximum.]
+[Opening paragraph: DO NOT open with "I am writing to apply for", "I'm writing about", "I am writing to express interest in", or any similar variant — these are boilerplate.
+Open with one of:
+  (a) a specific observation about the employer's current context or challenge that this role addresses, followed by a one-sentence positioning claim that only this candidate could make; or
+  (b) a direct positioning claim — "[what this role requires] is [what the candidate has specifically done for X years / built at Y]"; or
+  (c) a sentence naming something concrete the candidate has built or done, then connecting it directly to this specific role and employer.
+Do NOT use headcount figures, revenue numbers, or other statistics lifted verbatim from the job description — reference context, not their own data back at them.
+2–3 sentences maximum. Must be specific to this employer and role — not reusable elsewhere without editing.]
 
-[Body paragraph: direct line from most relevant experience to what this role needs.
-Draw on specific employers, achievements, and dates from the candidate profile. 3–4 sentences maximum.
+[Body paragraph: draw the direct line from the candidate's most relevant experience to what this role requires.
+Use specific employers, achievements, and dates from the candidate profile. 3–4 sentences maximum.
+— If the role is at a financial institution, or requires finance-domain expertise or judgment: explicitly state "twenty-plus years" of finance experience; name the #1 Institutional Investor All-Europe analyst credential (convertible bonds, Morgan Stanley, three consecutive years); name the relevant employers by name (Morgan Stanley, UBS Asset Management, Tantallon Capital, Plutus Capital as applicable). Do not abstract this experience as "the decades before that" without naming what was done where.
+— If the candidate's application notes name specific technologies, projects, or selling points: those MUST be addressed in the letter. They are the candidate's own judgment about what is most relevant after reading the role — weight them above your own project selection.
 Plain prose only — no typst function calls, no #link(), no #exp().]
 
-[Body paragraph: name and briefly describe one independent project from the project files that most directly evidences a technical capability this role requires. Explain why it is relevant to this specific role in one sentence. 2–3 sentences total. Plain prose only.]
+[Body paragraph: name and briefly describe one independent project from the project files that most directly evidences a technical capability this role requires. Explain why it is relevant to this specific role in one sentence. 2–3 sentences total.
+Project selection — apply in order:
+  1. If the candidate's application notes name a specific project or technology, that takes priority.
+  2. For roles at financial institutions, involving finance-domain AI, or requiring production-scale ML systems on real data: prefer synthetic-wealth-adviser (20 OpenChoreo components, six years of simulated trading history, TabPFN + LLM governance, real market data). Do NOT use job-search-mcp for applications to external employers.
+  3. For roles requiring governed agent platforms, MCP tool federation, multi-tenant agent control, or CNCF-adjacent work: CAIPE or OpenChoreo are appropriate. Note: OpenChoreo provides the cloud-native runtime and tenant isolation; CAIPE provides the agent control plane on top — describe whichever layer the role most cares about, or both briefly.
+  4. For roles requiring AI coding tooling, developer-experience tooling, or spec-driven development workflows: ai-dev-spec-driven-development is appropriate.
+Plain prose only.]
 
-[Closing paragraph: brief call to action. 1–2 sentences. Plain prose only.]
+[Closing paragraph: DO NOT use "I'd welcome the chance to discuss how this background could apply to [X]" or end with "Thank you for your consideration" as a standalone sentence — these appear in every other letter and signal template use.
+Instead: close with a specific, concrete statement — e.g. naming something running in your current infrastructure that maps directly to what the team is building, referencing a specific aspect of the role you find interesting enough to want to discuss, or a direct availability statement with the right-to-work fact if relevant.
+1–2 sentences. Plain prose only.]
 
 #letterSignature("../logos/mccoole_signature.png")
 """
@@ -144,9 +160,8 @@ _SLIDE_DECK_PATH = "assets/slide-deck-cover.pdf"
 # Fixed paragraph injected before #letterSignature in every cover letter.
 # Injected programmatically so it is always verbatim, never LLM-rewritten.
 _SLIDE_DECK_PARAGRAPH = (
-    "I'm attaching the cover of a slide-deck I use to convey ideas around AI. "
-    "Should any of the team want to review the full version, then please let me "
-    "know and I can easily email it."
+    "I'm attaching the cover from a slide-deck on AI — happy to send the full "
+    "version if useful."
 )
 
 # In-memory embedding cache for project files: content_hash -> vector.
@@ -420,7 +435,15 @@ fact not present in the Candidate Profile."""
 
     notes_section = ""
     if application_notes and application_notes.strip():
-        notes_section = f"\n\n## Candidate guidance (from application notes)\n{application_notes.strip()}"
+        notes_section = (
+            "\n\n## Candidate guidance — HIGH PRIORITY\n"
+            "The candidate has read this job description and provided the following "
+            "guidance about what to emphasise. This reflects their own judgment about "
+            "their strongest selling points for this specific role. Address every point "
+            "raised here explicitly in the cover letter — do not treat this as a soft "
+            "suggestion.\n\n"
+            + application_notes.strip()
+        )
 
     factual_section = "\n\n".join(
         f"## {path}\n{content}" for path, content in factual_docs
