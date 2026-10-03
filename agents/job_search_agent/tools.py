@@ -44,7 +44,7 @@ async def open_mcp_client():
     @contextlib.asynccontextmanager
     async def _ctx():
         async with httpx2.AsyncClient(headers=mcp_headers()) as http_client:
-            async with streamable_http_client(mcp_url(), http_client=http_client) as (r, w, _):
+            async with streamable_http_client(mcp_url(), http_client=http_client) as (r, w):
                 async with ClientSession(r, w) as session:
                     await session.initialize()
                     yield MCPClient(lambda: session)
