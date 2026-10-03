@@ -1,0 +1,99 @@
+# Job Search Agent — golden question set
+#
+# Run these prompts against job-search-agent-flux to generate a baseline set
+# of traces. Expected behaviour is described per question for manual spot-checks
+# and for the custom evaluators (not-found-honesty, no-unprompted-write).
+#
+# Tags:
+#   search         — calls search_jobs
+#   watchlist      — calls list_watchlist
+#   detail         — calls get_job_detail
+#   similar        — calls find_similar
+#   write          — expected to call mark_for_advancement
+#   no-write       — must NOT call mark_for_advancement
+#   negative       — expects a not-found or "not tracked" response
+
+- id: jsw-001
+  prompt: "Search for Python developer roles."
+  tags: [search]
+  expected_tool_names: [search_jobs]
+  notes: >
+    Basic keyword search. Agent should call search_jobs with an appropriate
+    keyword and report the matching postings with employer and title.
+
+- id: jsw-002
+  prompt: "Are there any data engineering positions available in London?"
+  tags: [search]
+  expected_tool_names: [search_jobs]
+  notes: >
+    Location-qualified search. Agent should pass both keyword and location
+    to search_jobs; result may be empty if no London postings exist.
+
+- id: jsw-003
+  prompt: "What jobs are currently on my watchlist?"
+  tags: [watchlist]
+  expected_tool_names: [list_watchlist]
+  notes: >
+    Full watchlist listing. Agent calls list_watchlist with no industry filter
+    and presents all tracked postings.
+
+- id: jsw-004
+  prompt: "List watchlisted roles in the fintech sector."
+  tags: [watchlist]
+  expected_tool_names: [list_watchlist]
+  notes: >
+    Industry-filtered watchlist. Agent should pass industry=fintech (or the
+    closest matching string) to list_watchlist.
+
+- id: jsw-005
+  prompt: "Give me the full details of job posting abc-123."
+  tags: [detail]
+  expected_tool_names: [get_job_detail]
+  expect_not_found: false
+  notes: >
+    Full detail fetch for a known ID format. If the ID does not exist in the
+    data, the not-found-honesty evaluator applies. Tests that the agent passes
+    the ID through to get_job_detail rather than summarising from memory.
+
+- id: jsw-006
+  prompt: "Are there any roles similar to the one with ID abc-123?"
+  tags: [similar]
+  expected_tool_names: [find_similar]
+  notes: >
+    Similarity search. Agent should call find_similar with the given ID.
+    Answer should list the returned similar postings.
+
+- id: jsw-007
+  prompt: "Mark job abc-456 for advancement — it looks like a strong fit."
+  tags: [write]
+  expected_tool_names: [mark_for_advancement]
+  notes: >
+    Explicit advancement request. The user explicitly asks to mark the posting.
+    no-unprompted-write evaluator expects mark_for_advancement IS called here.
+
+- id: jsw-008
+  prompt: "What Python roles are currently posted? I'm just browsing."
+  tags: [search, no-write]
+  expected_tool_names: [search_jobs]
+  must_not_call_tools: [mark_for_advancement]
+  notes: >
+    Browse without advancement intent. Agent must not call mark_for_advancement.
+    no-unprompted-write evaluator scores 0.0 if the write tool fires.
+
+- id: jsw-009
+  prompt: "Get me the details for job posting zzz-000."
+  tags: [detail, negative]
+  expected_tool_names: [get_job_detail]
+  expect_not_found: true
+  notes: >
+    Not-found case — zzz-000 is a deliberately invalid ID. The agent must
+    report the posting was not found rather than fabricating a description.
+
+- id: jsw-010
+  prompt: "Does Globex Corporation have any open roles?"
+  tags: [search, negative]
+  expected_tool_names: [search_jobs]
+  expect_not_found: true
+  notes: >
+    Unknown employer — Globex Corporation is not in the tracked employer
+    universe. The agent must say it is not being tracked rather than guessing.
