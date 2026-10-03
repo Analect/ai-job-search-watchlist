@@ -19,7 +19,7 @@ Environment variables:
 import os
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 from strands.tools.mcp import MCPClient
 
 _DEFAULT_MCP_URL = (
@@ -42,7 +42,7 @@ async def open_mcp_client():
 
     @contextlib.asynccontextmanager
     async def _ctx():
-        async with streamablehttp_client(mcp_url(), headers=mcp_headers()) as (r, w, _):
+        async with streamable_http_client(mcp_url(), headers=mcp_headers()) as (r, w, _):
             async with ClientSession(r, w) as session:
                 await session.initialize()
                 yield MCPClient(lambda: session)
