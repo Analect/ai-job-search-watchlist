@@ -18,6 +18,7 @@ Environment variables:
 """
 import os
 
+import httpx2
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from strands.tools.mcp import MCPClient
@@ -42,9 +43,10 @@ async def open_mcp_client():
 
     @contextlib.asynccontextmanager
     async def _ctx():
-        async with streamable_http_client(mcp_url(), headers=mcp_headers()) as (r, w, _):
-            async with ClientSession(r, w) as session:
-                await session.initialize()
-                yield MCPClient(lambda: session)
+        async with httpx2.AsyncClient(headers=mcp_headers()) as http_client:
+            async with streamable_http_client(mcp_url(), http_client=http_client) as (r, w, _):
+                async with ClientSession(r, w) as session:
+                    await session.initialize()
+                    yield MCPClient(lambda: session)
 
     return _ctx()
