@@ -29,7 +29,7 @@ _DEFAULT_MCP_URL = (
 
 
 def mcp_url() -> str:
-    return os.environ.get("MCP_PROXY_URL", _DEFAULT_MCP_URL)
+    return os.environ.get("MCP_PROXY_URL") or _DEFAULT_MCP_URL
 
 
 def mcp_headers() -> dict[str, str]:
