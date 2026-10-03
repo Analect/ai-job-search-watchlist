@@ -36,7 +36,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from strands import Agent
 
-from tools import open_mcp_client
+from tools import make_mcp_client
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,14 +93,14 @@ async def chat(req: ChatRequest) -> ChatResponse:
     log.info("session=%s message_len=%d", session_id, len(req.message))
 
     try:
-        async with await open_mcp_client() as mcp_client:
-            agent = Agent(
-                model=_build_model(),
-                tools=mcp_client,
-                system_prompt=SYSTEM_PROMPT,
-                callback_handler=None,
-            )
-            result = agent(req.message)
+        mcp_client = make_mcp_client()
+        agent = Agent(
+            model=_build_model(),
+            tools=[mcp_client],
+            system_prompt=SYSTEM_PROMPT,
+            callback_handler=None,
+        )
+        result = agent(req.message)
     except Exception as exc:
         log.exception("agent invocation failed", extra={"session_id": session_id})
         raise HTTPException(status_code=500, detail="agent invocation failed") from exc
