@@ -14,6 +14,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Agent deps — Strands, AMP instrumentation, and test tooling for agent code
+agents = [
+    "strands-agents>=1.52.0",
+    "amp-instrumentation",
+    "mcp>=2.0",
+    "boto3>=1.34",
+    "pytest>=8.0",
+]
 # Heavy ML deps — not installed in marimohub sandbox, install locally with: uv sync --extra ml
 ml = [
     "scikit-learn>=1.5",
