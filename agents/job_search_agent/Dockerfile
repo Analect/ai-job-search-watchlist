@@ -1,6 +1,10 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 WORKDIR /app
 ENV UV_CACHE_DIR=/tmp/uv-cache
+# Disable the Bedrock SDK instrumentor — it crashes on guardrail metrics when
+# traceloop runs with metrics disabled (guardrail_activation is None).
+# Anthropic-level spans are still captured by the Anthropic instrumentor.
+ENV OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=bedrock
 
 RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "fastapi>=0.115.0" \
