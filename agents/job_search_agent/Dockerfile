@@ -9,6 +9,7 @@ RUN uv pip install --system --no-cache --link-mode copy --reinstall \
     "mcp>=1.0.0" \
     "boto3>=1.34.0" \
     "amp-instrumentation" \
+    "requests" \
     "wrapt==1.17.3"
 
 COPY instrumentation.py prompt.md tools.py agent.py ./
