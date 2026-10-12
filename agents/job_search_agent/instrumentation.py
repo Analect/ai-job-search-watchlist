@@ -9,13 +9,18 @@ os.environ.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_latest_experiment
 # ALL metric instruments to None instead of NoOp objects. guardrail.py:179 then
 # crashes with AttributeError: 'NoneType'.add when Bedrock returns guardrail metadata.
 #
-# Fix: patch is_metrics_enabled in the bedrock module to always return True. This
-# runs at import time (server startup), before the lazy init fires on first request.
-# With metrics enabled, _create_metrics() runs and create_counter() calls use our
-# MeterProvider below — producing real (functional) counter objects.
+# Fix: register a post-import hook (via wrapt, a transitive OTel dep) that patches
+# is_metrics_enabled to always return True when the bedrock module is imported.
+# wrapt.register_post_import_hook fires immediately if the module is already present,
+# or defers until it is imported — so this is safe regardless of import order and does
+# NOT import the bedrock module eagerly (which causes a startup hang on this image).
 from opentelemetry.sdk.metrics import MeterProvider as _MeterProvider
 from opentelemetry import metrics as _otel_metrics
 _otel_metrics.set_meter_provider(_MeterProvider())
 
-import opentelemetry.instrumentation.bedrock as _bdr_module
-_bdr_module.is_metrics_enabled = lambda: True
+import wrapt as _wrapt
+
+def _patch_bedrock_metrics(module):
+    module.is_metrics_enabled = lambda: True
+
+_wrapt.register_post_import_hook(_patch_bedrock_metrics, 'opentelemetry.instrumentation.bedrock')
