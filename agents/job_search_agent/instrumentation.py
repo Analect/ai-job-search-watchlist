@@ -3,24 +3,38 @@ import os
 
 os.environ.setdefault("OTEL_SEMCONV_STABILITY_OPT_IN", "gen_ai_latest_experimental")
 
-# amp-instrumentation explicitly sets TRACELOOP_METRICS_ENABLED=false before
-# calling Traceloop.init() (lazy, on first request). opentelemetry-instrumentation-
-# bedrock 0.62.4 reads that env var in is_metrics_enabled() and, when False, sets
-# ALL metric instruments to None instead of NoOp objects. guardrail.py:179 then
-# crashes with AttributeError: 'NoneType'.add when Bedrock returns guardrail metadata.
+# amp-instrumentation injects PYTHONPATH=_bootstrap so sitecustomize.py runs at
+# Python startup (before any app code). That calls initialize_instrumentation()
+# which sets TRACELOOP_METRICS_ENABLED=false and immediately calls Traceloop.init(),
+# which calls BedrockInstrumentor().instrument() (_instrument()). Inside _instrument(),
+# is_metrics_enabled() returns False and ALL MetricParams instruments are set to None.
+# guardrail.py:179,208 then crash with AttributeError: 'NoneType'.add on any Bedrock
+# response that includes guardrail metadata.
 #
-# Fix: register a post-import hook (via wrapt, a transitive OTel dep) that patches
-# is_metrics_enabled to always return True when the bedrock module is imported.
-# wrapt.register_post_import_hook fires immediately if the module is already present,
-# or defers until it is imported — so this is safe regardless of import order and does
-# NOT import the bedrock module eagerly (which causes a startup hang on this image).
-from opentelemetry.sdk.metrics import MeterProvider as _MeterProvider
-from opentelemetry import metrics as _otel_metrics
-_otel_metrics.set_meter_provider(_MeterProvider())
+# Fix: after the bedrock module has been loaded (it's in sys.modules by the time
+# this module runs), replace guardrail_converse and guardrail_handling in the bedrock
+# module's namespace with None-safe wrappers. The wrapper closures installed by
+# _instrument() look up those names via __init__.py's globals at call time, so this
+# patch takes effect for all subsequent Bedrock calls without rebuilding any closures.
+import opentelemetry.instrumentation.bedrock as _bdr
 
-import wrapt as _wrapt
+_orig_guardrail_converse = _bdr.guardrail_converse
+_orig_guardrail_handling = _bdr.guardrail_handling
 
-def _patch_bedrock_metrics(module):
-    module.is_metrics_enabled = lambda: True
 
-_wrapt.register_post_import_hook(_patch_bedrock_metrics, 'opentelemetry.instrumentation.bedrock')
+def _safe_guardrail_converse(span, response, vendor, model, metric_params):
+    try:
+        return _orig_guardrail_converse(span, response, vendor, model, metric_params)
+    except AttributeError:
+        pass  # metrics disabled; guardrail metric increments skipped
+
+
+def _safe_guardrail_handling(span, response_body, vendor, model, metric_params):
+    try:
+        return _orig_guardrail_handling(span, response_body, vendor, model, metric_params)
+    except AttributeError:
+        pass  # metrics disabled; guardrail metric increments skipped
+
+
+_bdr.guardrail_converse = _safe_guardrail_converse
+_bdr.guardrail_handling = _safe_guardrail_handling
