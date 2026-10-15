@@ -11,7 +11,7 @@ handles.
 
 Environment variables (injected via ExternalSecret from
 secret/openchoreo/job-search-agent-flux, plus AMP-injected OTEL vars):
-  LLM_PROVIDER_URL    — AMP LLM Service Provider URL (OpenAI-compatible endpoint).
+  LLM_PROVIDER_URL    — LlmProxy gateway-runtime URL (OpenAI-compatible endpoint).
                         When set, routes LLM calls through the AMP gateway.
                         When absent, falls back to Bedrock direct.
   LLM_PROVIDER_KEY    — API key for the LLM provider
