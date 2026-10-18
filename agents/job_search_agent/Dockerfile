@@ -18,6 +18,9 @@ RUN uv pip install --system --no-cache --link-mode copy --reinstall \
 
 COPY instrumentation.py prompt.md tools.py agent.py ./
 
+RUN useradd --no-create-home --shell /bin/false agent && chown -R agent:agent /app
+USER agent
+
 EXPOSE 8080
 
 # amp-instrument wraps uvicorn with zero-code OTel tracing.
