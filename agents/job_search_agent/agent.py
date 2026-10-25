@@ -11,10 +11,13 @@ handles.
 
 Environment variables (injected via ExternalSecret from
 secret/openchoreo/job-search-agent-flux, plus AMP-injected OTEL vars):
-  LLM_PROVIDER_URL    — LlmProxy gateway-runtime URL (OpenAI-compatible endpoint).
-                        When set, routes LLM calls through the AMP gateway.
-                        When absent, falls back to Bedrock direct.
+  LLM_PROVIDER_URL    — AMP egress-gateway or OpenAI-compatible endpoint URL.
+                        When set, routes LLM calls through the AMP gateway via ABSK.
+                        When absent, falls back to Bedrock direct via IAM credentials.
   LLM_PROVIDER_KEY    — API key for the LLM provider
+  LLM_GATEWAY_FORMAT  — "bedrock" (default) or "openai". Controls how LLM_PROVIDER_URL
+                        is called. AMP egress gateways (port 22893) use Bedrock Converse
+                        format; set to "openai" for OpenAI-compatible endpoints.
   LLM_MODEL           — model identifier (default: us.anthropic.claude-sonnet-4-6)
   MCP_PROXY_URL       — AMP MCP Proxy endpoint for job-search-mcp-xplatform
   MCP_PROXY_KEY       — API key header value for the MCP proxy
@@ -47,18 +50,54 @@ log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = Path("prompt.md").read_text()
 
-LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL", "")
-LLM_PROVIDER_KEY = os.environ.get("LLM_PROVIDER_KEY", "")
+# generate-workload-cr may use legacy names (LLM_PROVIDER_URL/LLM_PROVIDER_KEY) or
+# component-prefixed names ({COMPONENT_UPPER}_LLM_CONFIG_URL/_LLM_CONFIG_API_KEY).
+LLM_PROVIDER_URL = os.environ.get("LLM_PROVIDER_URL") or next(
+    (v for k, v in os.environ.items() if k.endswith("_LLM_CONFIG_URL") and v), ""
+)
+LLM_PROVIDER_KEY = os.environ.get("LLM_PROVIDER_KEY") or next(
+    (v for k, v in os.environ.items() if k.endswith("_LLM_CONFIG_API_KEY") and v), ""
+)
 LLM_MODEL = os.environ.get("LLM_MODEL", "us.anthropic.claude-sonnet-4-6")
+LLM_GATEWAY_FORMAT = os.environ.get("LLM_GATEWAY_FORMAT", "bedrock")
 
 
 def _build_model():
     if LLM_PROVIDER_URL:
-        from strands.models.openai import OpenAIModel
-        log.info("LLM: AMP provider at %s model=%s", LLM_PROVIDER_URL, LLM_MODEL)
-        return OpenAIModel(
-            client_args={"api_key": LLM_PROVIDER_KEY, "base_url": LLM_PROVIDER_URL},
+        if LLM_GATEWAY_FORMAT == "openai":
+            # OpenAI-compatible endpoint (e.g. AMP AI gateway port 22895).
+            # AMP egress gateway also requires X-API-Key alongside Authorization: Bearer.
+            from strands.models.openai import OpenAIModel
+            log.info("LLM: OpenAI-compat provider at %s model=%s", LLM_PROVIDER_URL, LLM_MODEL)
+            return OpenAIModel(
+                client_args={
+                    "api_key": LLM_PROVIDER_KEY,
+                    "base_url": LLM_PROVIDER_URL,
+                    "default_headers": {"X-API-Key": LLM_PROVIDER_KEY},
+                },
+                model_id=LLM_MODEL,
+            )
+        # Default: AMP egress gateway (port 22893) is a Bedrock Converse proxy authenticated
+        # via X-API-Key (ABSK). Use BedrockModel with an unsigned boto3 session that injects
+        # X-API-Key before each request; the gateway handles its own Bedrock SigV4 auth.
+        import boto3
+        from botocore import UNSIGNED
+        from botocore.config import Config
+        from strands.models import BedrockModel
+
+        _key = LLM_PROVIDER_KEY
+
+        def _inject_absk(request, **kwargs):
+            request.headers["X-API-Key"] = _key
+
+        session = boto3.Session(aws_access_key_id="dummy", aws_secret_access_key="dummy")
+        session.events.register("before-send.bedrock-runtime.*", _inject_absk)
+        log.info("LLM: AMP Bedrock proxy at %s model=%s", LLM_PROVIDER_URL, LLM_MODEL)
+        return BedrockModel(
             model_id=LLM_MODEL,
+            boto_session=session,
+            boto_client_config=Config(signature_version=UNSIGNED),
+            endpoint_url=LLM_PROVIDER_URL,
         )
     from strands.models import BedrockModel
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -67,6 +106,11 @@ def _build_model():
 
 
 app = FastAPI(title="Job Search Agent", version="1.0.0")
+
+# Initialized once at startup — avoids a fresh MCP TCP connection + tool load on
+# every request, which caused per-request timeouts and init failures under load.
+_MODEL = _build_model()
+_MCP_CLIENT = make_mcp_client()
 
 
 class ChatRequest(BaseModel):
@@ -93,10 +137,9 @@ async def chat(req: ChatRequest) -> ChatResponse:
     log.info("session=%s message_len=%d", session_id, len(req.message))
 
     try:
-        mcp_client = make_mcp_client()
         agent = Agent(
-            model=_build_model(),
-            tools=[mcp_client],
+            model=_MODEL,
+            tools=[_MCP_CLIENT],
             system_prompt=SYSTEM_PROMPT,
             callback_handler=None,
         )
